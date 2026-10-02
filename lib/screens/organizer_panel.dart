@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
+import '../data/deep_links.dart';
 import '../domain/room_snapshot.dart';
 import '../domain/room_template.dart';
 import '../state/room_controller.dart';
@@ -92,6 +94,30 @@ class _OrganizerPanelState extends State<OrganizerPanel> {
                 ),
               ),
               const SizedBox(height: Gap.md),
+              // The room's position only ever moves forward, and the pointer
+              // stops on the last step, so this disables rather than failing
+              // on the final tap.
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: snapshot.isAtEndOfPlan
+                      ? GatherColors.muted
+                      : GatherColors.ultramarine,
+                ),
+                onPressed: snapshot.isAtEndOfPlan
+                    ? null
+                    : () => widget.controller.advanceStep(),
+                icon: Icon(
+                  snapshot.isAtEndOfPlan
+                      ? Icons.flag_rounded
+                      : Icons.skip_next_rounded,
+                ),
+                label: Text(
+                  snapshot.isAtEndOfPlan
+                      ? "That's the end of the plan"
+                      : 'Move everyone to the next step',
+                ),
+              ),
+              const SizedBox(height: Gap.md),
               if (snapshot.steps.isEmpty)
                 const Text(
                   'No steps yet. Add the first one below.',
@@ -171,60 +197,82 @@ class _CodeCard extends StatelessWidget {
 
   final String code;
 
+  String get deepLink => joinLink(code);
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Gap.md, vertical: Gap.lg),
+      padding: const EdgeInsets.all(Gap.lg),
       decoration: BoxDecoration(
         color: GatherColors.ultramarine,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'SHARE THIS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                    color: GatherColors.gold,
-                  ),
-                ),
-                const SizedBox(height: Gap.xs),
-                Text(
-                  code,
-                  style: const TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 8,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+          const Text(
+            'SHARE THIS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              color: GatherColors.gold,
             ),
           ),
-          IconButton(
-            tooltip: 'Copy code',
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.white.withValues(alpha: 0.15),
-              minimumSize: const Size(48, 48),
+          const SizedBox(height: Gap.md),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(Gap.md),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: QrImageView(
+                data: deepLink,
+                version: QrVersions.auto,
+                size: 190,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: GatherColors.ultramarineInk,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: GatherColors.ultramarineInk,
+                ),
+              ),
             ),
-            icon: const Icon(Icons.copy_rounded, color: Colors.white),
+          ),
+          const SizedBox(height: Gap.md),
+          Text(
+            code,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 8,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: Gap.md),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Colors.white54, width: 2),
+            ),
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: code));
+              Clipboard.setData(ClipboardData(text: deepLink));
               ScaffoldMessenger.of(context)
                 ..hideCurrentSnackBar()
                 ..showSnackBar(
                   const SnackBar(
-                    content: Text('Room code copied'),
+                    content: Text('Invite link copied'),
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
             },
+            icon: const Icon(Icons.ios_share_rounded),
+            label: const Text('Copy invite link'),
           ),
         ],
       ),

@@ -42,14 +42,23 @@ class RoomController extends ChangeNotifier {
   bool _busy = false;
   bool get busy => _busy;
 
+  int? _viewerMemberId;
+  int? get viewerMemberId => _viewerMemberId;
+
   final List<LiveReaction> _reactions = [];
   List<LiveReaction> get reactions => List.unmodifiable(_reactions);
 
   StreamSubscription<RoomEvent>? _eventSub;
   Timer? _ticker;
 
-  /// Bumped once a second while voting so countdowns repaint without every
-  /// screen owning its own timer.
+  /// The countdown is anchored to the server, not to this device's clock.
+  ///
+  /// A phone whose clock is three minutes fast would otherwise show the vote
+  /// ending three minutes early, and on two phones that means two different
+  /// reveal times. The server tells us how long is left, and we count down
+  /// from that using the device's own monotonic elapsed time.
+  int? _anchorRemainingMs;
+  DateTime? _anchorAt;
   DateTime _now = DateTime.now();
   DateTime get now => _now;
 
@@ -63,13 +72,8 @@ class RoomController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _snapshot = await _repository.getRoomState(
-        code,
-        viewerMemberId: viewerMemberId,
-      );
-      await _eventSub?.cancel();
-      _eventSub = _repository.events(code).listen(_onEvent);
-      _syncTicker();
+      await _fetch();
+      await _resubscribe();
     } on GatherRuleException catch (e) {
       _error = e.message;
       _snapshot = null;
@@ -79,28 +83,53 @@ class RoomController extends ChangeNotifier {
     }
   }
 
-  /// Re-binds the viewer, e.g. after storing a member id for a rejoining guest.
+  /// Re-reads the room and rebuilds the stream subscription.
+  ///
+  /// iOS drops the stream when the app is backgrounded, so a phone that locks
+  /// mid-vote comes back to a dead connection. Foregrounding has to go through
+  /// exactly the same path as a fresh join, and this is that path.
+  Future<void> resync() async {
+    if (_code == null) return;
+    try {
+      await _fetch();
+      await _resubscribe();
+    } on GatherRuleException catch (e) {
+      _error = e.message;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _fetch() async {
+    final code = _code;
+    if (code == null) return;
+    _snapshot = await _repository.getRoomState(
+      code,
+      viewerMemberId: _viewerMemberId,
+    );
+    _error = null;
+    _reanchor(_snapshot?.votingRemainingMs);
+    _syncTicker();
+  }
+
+  Future<void> _resubscribe() async {
+    final code = _code;
+    if (code == null) return;
+    await _eventSub?.cancel();
+    _eventSub = _repository.events(code).listen(_onEvent);
+  }
+
   Future<void> setViewer(int memberId) async {
     _viewerMemberId = memberId;
     await refresh();
   }
 
-  int? _viewerMemberId;
-  int? get viewerMemberId => _viewerMemberId;
-
   Future<void> refresh() async {
-    final code = _code;
-    if (code == null) return;
+    if (_code == null) return;
     try {
-      _snapshot = await _repository.getRoomState(
-        code,
-        viewerMemberId: _viewerMemberId,
-      );
-      _error = null;
+      await _fetch();
     } on GatherRuleException catch (e) {
       _error = e.message;
     }
-    _syncTicker();
     notifyListeners();
   }
 
@@ -113,20 +142,32 @@ class RoomController extends ChangeNotifier {
       );
       if (_reactions.length > 12) _reactions.removeAt(0);
       notifyListeners();
+      final memberId = event.memberId ?? 0;
       Timer(const Duration(seconds: 3), () {
-        _reactions.removeWhere((r) => r.id.startsWith('${event.memberId}-'));
+        _reactions.removeWhere((r) => r.id.startsWith('$memberId-'));
         notifyListeners();
       });
+    }
+    if (event.type == RoomEventType.votingStarted) {
+      _reanchor(event.remainingMs);
     }
     unawaited(refresh());
   }
 
+  void _reanchor(int? remainingMs) {
+    if (remainingMs == null) {
+      _anchorRemainingMs = null;
+      _anchorAt = null;
+      return;
+    }
+    _anchorRemainingMs = remainingMs;
+    _anchorAt = DateTime.now();
+  }
+
   void _syncTicker() {
-    final endsAt = _snapshot?.room.votingEndsAt;
-    final needsTicker =
-        _snapshot?.room.isVoting == true && endsAt != null;
+    final needsTicker = _snapshot?.room.isVoting ?? false;
     if (needsTicker && _ticker == null) {
-      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
         _now = DateTime.now();
         notifyListeners();
       });
@@ -136,30 +177,37 @@ class RoomController extends ChangeNotifier {
     }
   }
 
-  /// Seconds left, or null when not voting. Never negative.
+  /// Seconds left, counted from the server's anchor. Never negative.
   int? get secondsLeft {
-    final endsAt = _snapshot?.room.votingEndsAt;
-    if (!_snapshot!.room.isVoting || endsAt == null) return null;
-    final left = endsAt.difference(_now).inSeconds;
-    return left < 0 ? 0 : left;
+    final anchor = _anchorRemainingMs;
+    final at = _anchorAt;
+    if (anchor == null || at == null) return null;
+    if (!(_snapshot?.room.isVoting ?? false)) return null;
+    final elapsed = DateTime.now().difference(at).inMilliseconds;
+    final remaining = anchor - elapsed;
+    return (remaining <= 0 ? 0 : remaining) ~/ 1000;
   }
 
   // --- actions ------------------------------------------------------------
 
   Future<void> addItem(String text, {bool isAnonymous = false}) =>
-      _guard(() => _repository.addItem(
-        code: _requireCode(),
-        memberId: _requireMember(),
-        text: text,
-        isAnonymous: isAnonymous,
-      ));
+      _guard(
+        () => _repository.addItem(
+          code: _requireCode(),
+          memberId: _requireMember(),
+          text: text,
+          isAnonymous: isAnonymous,
+        ),
+      );
 
   Future<void> toggleVote(int itemId) =>
-      _guard(() => _repository.toggleVote(
-        code: _requireCode(),
-        memberId: _requireMember(),
-        itemId: itemId,
-      ));
+      _guard(
+        () => _repository.toggleVote(
+          code: _requireCode(),
+          memberId: _requireMember(),
+          itemId: itemId,
+        ),
+      );
 
   Future<void> checkIn() => _guard(
     () => _repository.checkIn(
@@ -177,7 +225,10 @@ class RoomController extends ChangeNotifier {
   );
 
   Future<void> closeVoting() => _guard(
-    () => _repository.closeVoting(code: _requireCode(), byMemberId: _requireMember()),
+    () => _repository.closeVoting(
+      code: _requireCode(),
+      byMemberId: _requireMember(),
+    ),
   );
 
   Future<void> addStep(String title) => _guard(
@@ -208,14 +259,6 @@ class RoomController extends ChangeNotifier {
       code: _requireCode(),
       memberId: _requireMember(),
       stepId: stepId,
-    ),
-  );
-
-  Future<void> setStepDone(int stepId, bool isDone) => _guard(
-    () => _repository.setStepDone(
-      code: _requireCode(),
-      stepId: stepId,
-      isDone: isDone,
     ),
   );
 

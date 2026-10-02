@@ -23,9 +23,26 @@ class RoomScreen extends StatefulWidget {
   State<RoomScreen> createState() => _RoomScreenState();
 }
 
-class _RoomScreenState extends State<RoomScreen> {
+class _RoomScreenState extends State<RoomScreen>
+    with WidgetsBindingObserver {
   RoomController? _controller;
   String? _lastError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // iOS tears the connection down when the app is backgrounded, so a phone
+    // that locks mid-vote comes back to a dead stream. Foregrounding goes
+    // through the same path as a fresh join: re-fetch, then re-subscribe.
+    if (state == AppLifecycleState.resumed) {
+      _controller?.resync();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -60,6 +77,7 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
     super.dispose();

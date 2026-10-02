@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -56,6 +58,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     });
 
     final repository = RepositoryScope.of(context);
+    // Read the scope before the awaits to avoid using a context across the
+    // async gap.
+    final identityStore = IdentityScope.of(context).store;
+    final navigator = Navigator.of(context);
     final expected = int.tryParse(_expectedController.text.trim());
 
     try {
@@ -66,8 +72,17 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         ownerEmoji: _emoji,
         expectedCount: expected,
       );
+      // Remember this phone's details and the room it just made, so a restart
+      // lands the organizer back where they were. Deliberately not awaited:
+      // a disk write should never hold up the transition into the room.
+      final ownerName = _nameController.text.trim().isEmpty
+          ? 'Organizer'
+          : _nameController.text.trim();
+      unawaited(identityStore.saveName(ownerName, _emoji));
+      unawaited(identityStore.saveLastRoom(snapshot.room.code));
+
       if (!mounted) return;
-      await Navigator.of(context).pushReplacement(
+      await navigator.pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => RoomScreen(
             code: snapshot.room.code,

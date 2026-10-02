@@ -65,10 +65,10 @@ Only meetup and movie need to work for the demo. Trip is a label change.
 ## 5. Data model (Serverpod .spy.yaml, adjust to current syntax)
 
 - `Room`: code (unique, 5 chars, no ambiguous letters), title, type, ownerId, status (open, voting, closed), votingEndsAt, winnerItemId, wasTie, createdAt, expectedCount (denominator for "12 of 20"), currentStepId (the one step the room is on right now)
-- `Member`: roomId, userId (or guest id), displayName, emoji, role (owner, guest), checkedInAt
-- `Item`: roomId, authorMemberId, text, isAnonymous, createdAt
+- `Member`: roomId, userId (owner's account id, or the device `guestId` for a guest), displayName, emoji, role (owner, guest), checkedInAt
+- `Item`: roomId, authorMemberId, kind, text, isAnonymous, createdAt, voteCount (denormalised, see voting rules)
 - `Vote`: itemId, memberId, createdAt, **unique index on (itemId, memberId)**
-- `AgendaStep`: roomId, title, at (nullable, for "break at 9:30"), position (ordering), isDone
+- `AgendaStep`: roomId, title, at (nullable, for "break at 9:30"), position (ordering). **No `isDone`** — done-ness comes from `currentStepId`.
 - Optional later: `ChecklistItem`, `Expense`, `Participant share`
 - Reactions are ephemeral stream events. Do not store them.
 
@@ -80,20 +80,49 @@ Index `Room.code`, `Item.roomId`, `AgendaStep.roomId`, and `Vote.itemId`.
 
 **Streaming.** One stream per room. Define a single serializable `RoomEvent` class with a `type` field and payload: `memberJoined`, `itemAdded`, `voteChanged(itemId, count)`, `checkedIn(count, total)`, `reaction(emoji, memberId)`, `votingStarted(endsAt)`, `votingClosed(winnerItemId, wasTie)`, `stepChanged(stepId)`. Clients send actions through normal endpoints; the server validates and broadcasts events to everyone in the room.
 
-**Snapshot.** Streams only carry changes, so a client that joins late or reconnects after a phone sleeps would render an empty room. Every room needs a `getRoomState(code)` call that returns the room, members, items with their current vote counts, and agenda steps. Clients fetch this first, then subscribe. Do not skip this; it is the difference between the app working and the app working on a good network.
+**Snapshot.** Streams only carry changes, so a client that joins late or reconnects after a phone sleeps would render an empty room. Every room needs a `getRoomState(code)` call that returns the room, members, items with their current vote counts, agenda steps, and `votingRemainingMs`. Clients fetch this first, then subscribe. Do not skip this; it is the difference between the app working and the app working on a good network.
+
+**Guest identity.** A guest who closes the app and reopens must get their old `Member` back, not a new one, or the check-in counter inflates the moment a phone sleeps. The device generates a `guestId` UUID and keeps it. `joinRoom` takes that `guestId`; when it matches an existing member, the same member returns with `checkedInAt` intact. Persist exactly four things: `guestId`, display name, emoji, last room code.
+
+**Permission matrix.** "Validate roles" is not a rule until it is written down. Enforce every row on the server.
+
+| Action | Owner | Guest |
+|---|---|---|
+| Create or close a room | yes | no |
+| Start a vote, close early | yes | no |
+| Set or advance the current step | yes | no |
+| Add an item, vote, react, check in | yes | yes |
+| See the author of an anonymous item | yes | no |
+
+That last row is the interesting one. Guests see an anonymous item as just "Anonymous"; the organizer keeps visibility for moderation.
 
 **Voting rules (enforce on the server, never trust the client).**
 - Reject votes when room status is not `voting` or `now > votingEndsAt`.
 - One vote per member per item (unique constraint). Toggling a vote removes it.
-- Close is idempotent. Schedule a future call for `votingEndsAt`, and also run a lazy close check whenever a vote arrives after the deadline, so a missed or restarted job cannot leave a room stuck.
-- Winner is the item with the most votes. On a tie, pick randomly among tied items on the server and set `wasTie = true` so clients can show the spinner. Zero items: close with no winner.
+- Denormalise `Item.voteCount` and update it in the same transaction as the vote insert or delete. Counting `Vote` rows on every broadcast and every snapshot is wasted work; this makes both O(1).
+- Close is idempotent. Schedule a future call for `votingEndsAt`, and also run a lazy close check whenever a vote arrives after the deadline **and** on every read, so a missed or restarted job cannot leave a room stuck.
+- Winner is the item with the most votes, resolved on the server and written to `Room.winnerItemId`. Clients never compute a winner. On a tie, pick randomly among tied items and set `wasTie = true`; the spinner animates to the server's pick, it does not decide it. If clients decided, two phones could reveal different winners. Zero votes: close with no winner and show a designed empty state, not a fallback.
+
+**Clock skew.** Never have a client compute `votingEndsAt - DateTime.now()`. A phone whose clock is three minutes fast ends the vote three minutes early, and two phones then disagree about the reveal. The server reports `votingRemainingMs` in both the snapshot and `votingStarted`, and clients anchor their countdown to that value using their own elapsed time.
+
+**Ordering.** The server owns item order and the client must not re-sort, or rows reshuffle under someone's thumb. Oldest first before voting. Most votes first while voting, then **frozen for the final 10 seconds** so nobody is mid-tap when rows move. Most votes first again after the close, for the result.
+
+**Foregrounding.** iOS drops the connection when the app is backgrounded, so a phone that locks mid-vote returns to a dead stream. On `AppLifecycleState.resumed`, re-fetch `getRoomState` and re-subscribe. Same code path as a fresh join; make sure the lifecycle callback actually calls it.
 
 **Agenda rules.**
-- Exactly one step is current at a time. Advancing moves the pointer and is idempotent.
-- The current step may only move forward, so a late-arriving client cannot rewind the room.
-- Any member may tick a step done; the organizer may set and advance the current step.
+- Exactly one step is current at a time, tracked by `Room.currentStepId`. Done-ness is **derived** from that pointer: steps before it are done, the pointed-at step is current, steps after it are upcoming. There is no `isDone` flag, because two sources of truth will disagree.
+- Advancing moves the pointer and is idempotent. A late-arriving client cannot rewind the room.
+- Only the organizer may set or advance the current step.
+- There is no "past the end" state. At the final step the pointer stays put and the advance control disables, so "where are we?" always has an answer.
 
 **Check-in.** The join QR encodes `gather://join/<CODE>`. In meetup rooms, joining through the QR sets `checkedInAt`. Other room types use a manual button. Broadcast the new count on every check-in.
+
+**QR is three separate problems.** Do not conflate them, and do not ship only the first two.
+1. **Generate** the QR in the organizer panel (`qr_flutter`).
+2. **Scan** it inside the app from the join screen (`mobile_scanner`). Needs the camera permission declared on both platforms.
+3. **Receive** it as a deep link when someone scans from the stock camera app (`app_links`). This is the one that gets forgotten, and without it the QR does nothing. Register the `gather` scheme in `Info.plist` (`CFBundleURLTypes`) and `AndroidManifest.xml` (an `intent-filter` with `android:scheme="gather"`), and start the listener at app start-up: a link that cold-launches the app is delivered once, and only to a listener that already exists. Route it to the join screen with the code prefilled, and treat it as a QR arrival for check-in purposes.
+
+One parser serves all three. The scanner, the deep-link handler and the generated link must agree on what a code is, so a QR written one way and read another cannot disagree.
 
 **Cleanup.** Optional scheduled task to close rooms older than 24 hours.
 
@@ -114,7 +143,11 @@ Design direction: friendly and a little playful. Deep ultramarine (#3A2FE0 range
 
 ## 8. Build order (about 14 days)
 
-**Phase -1: Client-first prototype. In progress.** The full app is built against a `RoomRepository` interface with a local in-memory implementation, so every domain rule, screen, and state can be validated before a backend exists. UI and domain logic never touch storage directly. When Serverpod is added this becomes an implementation swap, not a rewrite. Two things are not in the plan yet and need approval when we get there: the QR packages, and a persistence package so a room survives an app restart. Single-device only, so two-phone sync is not yet demonstrable.
+**Phase -1: Client-first prototype. Done.** The full app is built against a `RoomRepository` interface with a local in-memory implementation, so every domain rule, screen, and state was validated before a backend existed. UI and domain logic never touch storage directly; when Serverpod is added this becomes an implementation swap, not a rewrite.
+
+Already in the prototype: the three room templates, the shared agenda, the check-in counter, items and votes, timed voting with a scheduled close, the server-picked winner with tie handling, the permission matrix, the server-anchored countdown, order freezing, foreground resync, guest rejoin by device id, QR generate plus scan plus deep link, and the designed zero-vote reveal. 47 tests cover the room rules, the code contract and the create-room flow.
+
+Still single-device, so two-phone sync is not yet demonstrable. That needs the backend.
 
 **Phase 0: Days 1-2.** Serverpod project, Flutter app, models and migrations, auth (organizer) plus guest identity, room create and join by code. Commit early.
 

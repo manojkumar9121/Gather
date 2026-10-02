@@ -16,7 +16,9 @@ abstract class RoomRepository {
   /// because a stream only carries what happens from now on.
   Stream<RoomEvent> events(String code);
 
-  /// Everything needed to render the room, for [viewerMemberId].
+  /// Everything needed to render the room, for [viewerMemberId]. Carries
+  /// [RoomSnapshot.votingRemainingMs] measured on the server so the client's
+  /// countdown does not depend on the phone's clock.
   Future<RoomSnapshot> getRoomState(String code, {int? viewerMemberId});
 
   Future<RoomSnapshot> createRoom({
@@ -27,10 +29,17 @@ abstract class RoomRepository {
     int? expectedCount,
   });
 
+  /// Joins a room, or rejoins it.
+  ///
+  /// [guestId] is the device-generated identity the phone persists across
+  /// restarts. When it matches an existing member the same [Member] comes back
+  /// with its check-in intact, so a phone that sleeps mid-demo does not inflate
+  /// the check-in count. Omit it for a genuinely new guest.
   Future<RoomSnapshot> joinRoom({
     required String code,
     required String displayName,
     required String emoji,
+    String? guestId,
     bool viaQr = false,
   });
 
@@ -79,16 +88,9 @@ abstract class RoomRepository {
     required int stepId,
   });
 
-  /// Moves to the next step and marks the current one done.
+  /// Moves to the next step. There is no "past the end" state; at the final
+  /// step the pointer stays put and this reports that there is nothing left.
   Future<void> advanceStep({required String code, required int memberId});
-
-  /// Any member can tick a step off; the organizer is not the only one who can
-  /// say "that bit is finished".
-  Future<void> setStepDone({
-    required String code,
-    required int stepId,
-    required bool isDone,
-  });
 
   /// Ephemeral. Never stored, never replayed.
   Future<void> sendReaction({

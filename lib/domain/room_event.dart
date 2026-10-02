@@ -13,7 +13,18 @@ enum RoomEventType {
 }
 
 class RoomEvent {
-  const RoomEvent(this.type, {this.memberId, this.itemId, this.count, this.total, this.emoji, this.endsAt, this.winnerItemId, this.wasTie, this.stepId});
+  const RoomEvent(
+    this.type, {
+    this.memberId,
+    this.itemId,
+    this.count,
+    this.total,
+    this.emoji,
+    this.remainingMs,
+    this.winnerItemId,
+    this.wasTie,
+    this.stepId,
+  });
 
   const RoomEvent.memberJoined(int memberId)
     : this(RoomEventType.memberJoined, memberId: memberId);
@@ -34,8 +45,8 @@ class RoomEvent {
         memberId: memberId,
       );
 
-  const RoomEvent.votingStarted(DateTime endsAt)
-    : this(RoomEventType.votingStarted, endsAt: endsAt);
+  const RoomEvent.votingStarted(int remainingMs)
+    : this(RoomEventType.votingStarted, remainingMs: remainingMs);
 
   const RoomEvent.votingClosed(int? winnerItemId, bool wasTie)
     : this(
@@ -53,7 +64,11 @@ class RoomEvent {
   final int? count;
   final int? total;
   final String? emoji;
-  final DateTime? endsAt;
+
+  /// Milliseconds left, measured on the server. Clients anchor to this rather
+  /// than subtracting from their own `DateTime.now()`, which would be wrong on
+  /// any phone whose clock is off.
+  final int? remainingMs;
   final int? winnerItemId;
   final bool? wasTie;
   final int? stepId;

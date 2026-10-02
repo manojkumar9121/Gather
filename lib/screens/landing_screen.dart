@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../data/guest_identity.dart';
 import '../theme.dart';
 import 'create_room_screen.dart';
 import 'join_screen.dart';
 
 class LandingScreen extends StatelessWidget {
-  const LandingScreen({super.key});
+  const LandingScreen({super.key, this.identity});
+
+  final GuestIdentity? identity;
 
   @override
   Widget build(BuildContext context) {
+    final lastRoom = identity?.lastRoomCode;
+
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -35,7 +40,24 @@ class LandingScreen extends StatelessWidget {
                 ),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: Gap.xxl),
+              const SizedBox(height: Gap.xl),
+              // Someone who already used the app should not have to remember
+              // a five character code to get back where they were.
+              if (lastRoom != null && lastRoom.isNotEmpty) ...[
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => JoinScreen(
+                        initialCode: lastRoom,
+                        identity: identity,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.history_rounded),
+                  label: Text('Back into room $lastRoom'),
+                ),
+                const SizedBox(height: Gap.sm),
+              ],
               FilledButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(

@@ -66,5 +66,22 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Registers the gather:// scheme so a camera app can hand a scanned room
+	     QR to the app. Must be present or deep links silently do nothing. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>dev.gather.join</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>gather</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Gather uses the camera to scan a room QR so you can join.</string>
 </dict>
 </plist>

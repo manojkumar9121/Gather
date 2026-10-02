@@ -44,7 +44,9 @@ class _ItemsTabState extends State<ItemsTab> {
     final snapshot = widget.snapshot;
     final room = snapshot.room;
     final template = templateFor(room.type);
-    final items = room.isClosed ? snapshot.rankedItems : snapshot.items;
+    // Items arrive in the order the server wants them. Re-sorting here is how
+    // a list ends up reshuffling under someone's thumb.
+    final items = snapshot.items;
 
     return Column(
       children: [
@@ -70,7 +72,13 @@ class _ItemsTabState extends State<ItemsTab> {
             ],
           ),
         ),
-        if (!room.isClosed) _Composer(controller: _controller, focus: _focus, template: template, onSubmit: _submit),
+        if (!room.isClosed)
+          _Composer(
+            controller: _controller,
+            focus: _focus,
+            template: template,
+            onSubmit: _submit,
+          ),
       ],
     );
   }
@@ -85,6 +93,9 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final winner = snapshot.winner;
 
+    // Nobody voted. This is a designed state rather than a fallback: a plain
+    // dot instead of the gold accent, no confetti, one plain line. A grey
+    // result reads as "nothing happened" and not as "something broke".
     if (winner == null) {
       return Container(
         width: double.infinity,
@@ -93,22 +104,19 @@ class _ResultCard extends StatelessWidget {
           color: kStageBackground,
           borderRadius: BorderRadius.circular(22),
         ),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: const Row(
           children: [
-            Text(
-              'Voting closed',
-              style: TextStyle(
-                color: GatherColors.gold,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
+            Icon(Icons.circle, size: 10, color: GatherColors.muted),
+            SizedBox(width: Gap.md),
+            Expanded(
+              child: Text(
+                'Nobody voted this time. Start another?',
+                style: TextStyle(
+                  color: GatherColors.offWhite,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            SizedBox(height: Gap.sm),
-            Text(
-              'No votes came in, so there is no winner.',
-              style: TextStyle(color: Colors.white, fontSize: 18, height: 1.3),
             ),
           ],
         ),
@@ -195,7 +203,10 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final item = view.item;
     final author = snapshot.memberById(item.authorMemberId);
-    final byline = item.isAnonymous
+
+    // Guests never see who wrote an anonymous item. The organizer keeps
+    // visibility so they can moderate.
+    final byline = view.authorHidden
         ? 'Anonymous'
         : '${author?.emoji ?? '🙂'} ${author?.displayName ?? 'Someone'}';
 

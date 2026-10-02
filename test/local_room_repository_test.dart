@@ -17,6 +17,7 @@ void main() {
     repo = LocalRoomRepository(
       random: Random(42),
       minimumVotingDuration: const Duration(milliseconds: 30),
+      voteOrderFreeze: const Duration(milliseconds: 150),
     );
   });
 
@@ -132,6 +133,52 @@ void main() {
         ),
         throwsA(isA<GatherRuleException>()),
       );
+    });
+
+    test('a rejoining guest gets the same member, check-in intact', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+
+      final first = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+        guestId: 'device-abc',
+        viaQr: true,
+      );
+      expect(first.checkedInCount, 1);
+
+      // Same phone, app closed and reopened. It must not become a new person.
+      final second = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+        guestId: 'device-abc',
+      );
+
+      expect(second.viewerMemberId, first.viewerMemberId);
+      expect(second.members, hasLength(first.members.length));
+      expect(second.checkedInCount, 1);
+      expect(second.viewer!.isCheckedIn, isTrue);
+    });
+
+    test('a different device joining is a different member', () async {
+      final room = await makeRoom();
+      final a = await repo.joinRoom(
+        code: room.room.code,
+        displayName: 'Sam',
+        emoji: '🔥',
+        guestId: 'device-a',
+      );
+      final b = await repo.joinRoom(
+        code: room.room.code,
+        displayName: 'Sam',
+        emoji: '🔥',
+        guestId: 'device-b',
+      );
+
+      expect(b.viewerMemberId, isNot(a.viewerMemberId));
+      expect(b.members, hasLength(3));
     });
 
     test('checking in twice is refused', () async {
@@ -473,6 +520,223 @@ void main() {
     });
   });
 
+  group('anonymity and ordering', () {
+    test('a guest cannot see who wrote an anonymous item, the owner can',
+        () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      await repo.addItem(
+        code: code,
+        memberId: room.viewerMemberId!,
+        text: 'A quiet question',
+        isAnonymous: true,
+      );
+      await repo.addItem(
+        code: code,
+        memberId: room.viewerMemberId!,
+        text: 'An ordinary one',
+      );
+
+      final ownerView = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      expect(
+        ownerView.items.firstWhere((i) => i.item.isAnonymous).canSeeAuthor,
+        isTrue,
+      );
+
+      final guest = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+      );
+      final guestView = await repo.getRoomState(
+        code,
+        viewerMemberId: guest.viewerMemberId,
+      );
+      final anonymous = guestView.items.firstWhere((i) => i.item.isAnonymous);
+      expect(anonymous.canSeeAuthor, isFalse);
+      expect(anonymous.authorHidden, isTrue);
+    });
+
+    test('items stay oldest-first before a vote opens', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      for (final text in ['first', 'second', 'third']) {
+        await repo.addItem(
+          code: code,
+          memberId: room.viewerMemberId!,
+          text: text,
+        );
+      }
+
+      final snapshot = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      expect(
+        snapshot.items.map((i) => i.item.text),
+        ['first', 'second', 'third'],
+      );
+    });
+
+    test('items reorder by votes while a vote is running', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      for (final text in ['A', 'B', 'C']) {
+        await repo.addItem(
+          code: code,
+          memberId: room.viewerMemberId!,
+          text: text,
+        );
+      }
+      final ids = (await repo.getRoomState(code)).items
+          .map((i) => i.item.id)
+          .toList();
+
+      await repo.startVoting(
+        code: code,
+        memberId: room.viewerMemberId!,
+        duration: const Duration(minutes: 5),
+      );
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: ids[2],
+      );
+
+      final snapshot = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      expect(snapshot.items.first.item.id, ids[2]);
+      expect(snapshot.items.first.votes, 1);
+    });
+
+    test('the order freezes before the deadline so rows stop moving', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      for (final text in ['A', 'B', 'C']) {
+        await repo.addItem(
+          code: code,
+          memberId: room.viewerMemberId!,
+          text: text,
+        );
+      }
+      final guest = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+      );
+      final ids = (await repo.getRoomState(code)).items
+          .map((i) => i.item.id)
+          .toList();
+
+      // Long enough to pass through the freeze window, short enough to test.
+      await repo.startVoting(
+        code: code,
+        memberId: room.viewerMemberId!,
+        duration: const Duration(milliseconds: 400),
+      );
+
+      // Well before the freeze: the list is live and reorders on votes.
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: ids[2],
+      );
+      final beforeFreeze = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      expect(beforeFreeze.items.first.item.id, ids[2]);
+
+      // Now inside the final stretch: a new vote must not reshuffle the list,
+      // because somebody is mid-tap.
+      await Future<void>.delayed(const Duration(milliseconds: 280));
+      final frozenBefore = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      final order = frozenBefore.items.map((i) => i.item.id).toList();
+
+      // A vote for the item currently at the top of the list would normally
+      // be the thing that moves rows around.
+      await repo.toggleVote(
+        code: code,
+        memberId: guest.viewerMemberId!,
+        itemId: ids[0],
+      );
+
+      final frozenAfter = await repo.getRoomState(
+        code,
+        viewerMemberId: room.viewerMemberId,
+      );
+      // The counts still update; only the order is held.
+      expect(frozenAfter.items.firstWhere((i) => i.item.id == ids[0]).votes, 1);
+      expect(frozenAfter.items.map((i) => i.item.id).toList(), order);
+    });
+
+    test('the snapshot carries the server-side remaining time', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      await repo.addItem(
+        code: code,
+        memberId: room.viewerMemberId!,
+        text: 'A',
+      );
+
+      // No vote running, so there is no time to report.
+      expect(
+        (await repo.getRoomState(code)).votingRemainingMs,
+        isNull,
+      );
+
+      await repo.startVoting(
+        code: code,
+        memberId: room.viewerMemberId!,
+        duration: const Duration(minutes: 2),
+      );
+      final remaining = (await repo.getRoomState(code)).votingRemainingMs;
+      expect(remaining, isNotNull);
+      expect(remaining, greaterThan(0));
+      // Close to two minutes, not wildly off.
+      expect(remaining, lessThanOrEqualTo(120000));
+    });
+
+    test('voteChanged carries the denormalised count', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      await repo.addItem(
+        code: code,
+        memberId: room.viewerMemberId!,
+        text: 'A',
+      );
+      final itemId = (await repo.getRoomState(code)).items.first.item.id;
+
+      final seen = <RoomEvent>[];
+      final sub = repo.events(code).listen(seen.add);
+      await repo.startVoting(
+        code: code,
+        memberId: room.viewerMemberId!,
+        duration: const Duration(minutes: 5),
+      );
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: itemId,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final changes = seen.where((e) => e.type == RoomEventType.voteChanged);
+      expect(changes, hasLength(1));
+      expect(changes.first.count, 1);
+      expect(changes.first.itemId, itemId);
+      await sub.cancel();
+    });
+  });
+
   group('agenda', () {
     test('advancing moves the pointer and finishes the step behind it', () async {
       final room = await makeRoom();
@@ -571,24 +835,54 @@ void main() {
       );
     });
 
-    test('any member can tick a step done', () async {
+    test('done-ness is derived from the pointer, not stored', () async {
       final room = await makeRoom();
       final code = room.room.code;
-      final guest = await repo.joinRoom(
-        code: code,
-        displayName: 'Sam',
-        emoji: '🔥',
+      final steps = (await repo.getRoomState(code)).steps;
+
+      // Before moving, the first step is current and the rest upcoming.
+      var snapshot = await repo.getRoomState(code);
+      expect(snapshot.stateFor(steps[0]), AgendaStepState.current);
+      expect(snapshot.stateFor(steps[1]), AgendaStepState.upcoming);
+
+      // One advance and the first becomes done purely by being behind the
+      // pointer. There is no flag that could disagree.
+      await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      snapshot = await repo.getRoomState(code);
+      expect(snapshot.stateFor(steps[0]), AgendaStepState.done);
+      expect(snapshot.stateFor(steps[1]), AgendaStepState.current);
+    });
+
+    test('the pointer stops on the last step rather than running past it',
+        () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+
+      final atEnd = await repo.getRoomState(code);
+      expect(atEnd.isAtEndOfPlan, isTrue);
+      expect(atEnd.nextStep, isNull);
+      expect(atEnd.currentStep!.position, stepCount - 1);
+
+      // One more advance refuses rather than producing a past-the-end state.
+      expect(
+        () => repo.advanceStep(code: code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('last step'),
+          ),
+        ),
       );
-      final currentId = (await repo.getRoomState(code)).currentStep!.id;
 
-      await repo.setStepDone(code: code, stepId: currentId, isDone: true);
-
-      // Re-read the step, since the snapshot taken before the update still
-      // holds the old copy.
-      final after = await repo.getRoomState(code);
-      final updated = after.steps.firstWhere((s) => s.id == currentId);
-      expect(after.stateFor(updated), AgendaStepState.done);
-      expect(guest.viewerMemberId, isNotNull);
+      // And the pointer is still on the final step afterwards.
+      final stillThere = await repo.getRoomState(code);
+      expect(stillThere.room.currentStepId, atEnd.room.currentStepId);
     });
 
     test('adding a step to a room with no steps starts the plan', () async {

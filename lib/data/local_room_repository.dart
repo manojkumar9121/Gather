@@ -16,6 +16,7 @@ class LocalRoomRepository implements RoomRepository {
   LocalRoomRepository({
     Random? random,
     this.minimumVotingDuration = const Duration(seconds: 5),
+    this.voteOrderFreeze = const Duration(seconds: 10),
   }) : _random = random ?? Random.secure();
 
   final Random _random;
@@ -25,6 +26,11 @@ class LocalRoomRepository implements RoomRepository {
   /// Floor on a vote's length. Exposed so tests can exercise the deadline
   /// path without waiting five seconds.
   final Duration minimumVotingDuration;
+
+  /// Votes stop reshuffling the list this long before the deadline, so nobody
+  /// is mid-tap when rows swap under them. Exposed for the same reason as
+  /// [minimumVotingDuration].
+  final Duration voteOrderFreeze;
 
   /// Room codes are 5 characters with no ambiguous glyphs: no I, O, 0 or 1,
   /// so a code read aloud or typed off a screen does not get mistyped.
@@ -81,7 +87,10 @@ class LocalRoomRepository implements RoomRepository {
     // Safety net for a missed scheduled close: a room whose deadline has
     // passed closes on read, so it can never sit stuck.
     _lazyCloseIfPastDeadline(store);
-    return store.snapshot(viewerMemberId: viewerMemberId);
+    return store.snapshot(
+      viewerMemberId: viewerMemberId,
+      freeze: voteOrderFreeze,
+    );
   }
 
   // --- writes -------------------------------------------------------------
@@ -133,7 +142,10 @@ class LocalRoomRepository implements RoomRepository {
     );
     store.ownerMemberId = owner.id;
 
-    return store.snapshot(viewerMemberId: owner.id);
+    return store.snapshot(
+      viewerMemberId: owner.id,
+      freeze: voteOrderFreeze,
+    );
   }
 
   @override
@@ -141,6 +153,7 @@ class LocalRoomRepository implements RoomRepository {
     required String code,
     required String displayName,
     required String emoji,
+    String? guestId,
     bool viaQr = false,
   }) async {
     final store = _store(code);
@@ -149,12 +162,23 @@ class LocalRoomRepository implements RoomRepository {
       throw const GatherRuleException('Add a name so people know who you are.');
     }
 
+    // A phone that closes and reopens comes back with the same identity and
+    // gets the same Member, check-in included. Without this, a phone sleeping
+    // mid-vote rejoins as a new person and inflates the count.
+    final existing = guestId == null ? null : store.memberByUserId(guestId);
+    if (existing != null) {
+      return store.snapshot(
+        viewerMemberId: existing.id,
+        freeze: voteOrderFreeze,
+      );
+    }
+
     final template = templateFor(store.room.type);
 
     // In meetup rooms the QR sits at the door, so scanning it is arriving.
     final autoCheckIn = viaQr && template.autoCheckInOnQr;
     final member = store.newMember(
-      userId: 'guest-${_random.nextInt(1 << 32).toRadixString(16)}',
+      userId: guestId ?? 'guest-${_random.nextInt(1 << 32).toRadixString(16)}',
       displayName: name,
       emoji: emoji,
       role: MemberRole.guest,
@@ -168,7 +192,10 @@ class LocalRoomRepository implements RoomRepository {
     }
     store.emit(RoomEvent.memberJoined(member.id));
 
-    return store.snapshot(viewerMemberId: member.id);
+    return store.snapshot(
+      viewerMemberId: member.id,
+      freeze: voteOrderFreeze,
+    );
   }
 
   @override
@@ -239,13 +266,19 @@ class LocalRoomRepository implements RoomRepository {
     }
 
     final key = '$itemId:$memberId';
+    int updatedCount;
     if (store.votes.containsKey(key)) {
       store.votes.remove(key);
+      updatedCount = item.voteCount - 1;
     } else {
       store.votes[key] = DateTime.now();
+      updatedCount = item.voteCount + 1;
     }
 
-    store.emit(RoomEvent.voteChanged(itemId, store.voteCount(itemId)));
+    // The counter moves in the same operation as the vote row, so a snapshot
+    // or a broadcast never has to count anything.
+    store.items[itemId] = item.copyWith(voteCount: updatedCount);
+    store.emit(RoomEvent.voteChanged(itemId, updatedCount));
   }
 
   @override
@@ -298,6 +331,7 @@ class LocalRoomRepository implements RoomRepository {
       status: RoomStatus.voting,
       votingEndsAt: endsAt,
     );
+    store.frozenOrder = null;
 
     // Local stand-in for the server's scheduled future call. Same contract:
     // fire at the deadline, and closing twice must be harmless.
@@ -307,7 +341,9 @@ class LocalRoomRepository implements RoomRepository {
       unawaited(closeVoting(code: store.room.code));
     });
 
-    store.emit(RoomEvent.votingStarted(endsAt));
+    // Announce the remaining time rather than an absolute deadline, so the
+    // client does not have to trust its own clock.
+    store.emit(RoomEvent.votingStarted(duration.inMilliseconds));
   }
 
   @override
@@ -328,7 +364,8 @@ class LocalRoomRepository implements RoomRepository {
 
     if (store.items.isNotEmpty) {
       final counts = {
-        for (final item in store.items.values) item.id: store.voteCount(item.id),
+        for (final item in store.items.values)
+          item.id: item.voteCount,
       };
       final top = counts.values.reduce(max);
       if (top > 0) {
@@ -339,8 +376,9 @@ class LocalRoomRepository implements RoomRepository {
         if (tied.length == 1) {
           winnerId = tied.single;
         } else {
-          // The server owns the tie-break, and tells clients it happened so
-          // they can put on the spinner rather than pretending it was close.
+          // The server owns the tie-break and tells clients it happened, so a
+          // spinner animates to the server's pick. If the client decided, two
+          // phones could reveal different winners.
           winnerId = tied[_random.nextInt(tied.length)];
           wasTie = true;
         }
@@ -374,7 +412,9 @@ class LocalRoomRepository implements RoomRepository {
 
     // A room with no pointer yet starts on its first step.
     if (store.room.currentStepId == null && store.steps.isNotEmpty) {
-      store.room = store.room.copyWith(currentStepId: store.steps.values.first.id);
+      store.room = store.room.copyWith(
+        currentStepId: store.steps.values.first.id,
+      );
       store.emit(RoomEvent.stepChanged(store.room.currentStepId!));
     }
   }
@@ -429,7 +469,6 @@ class LocalRoomRepository implements RoomRepository {
           'The plan only moves forward. Delete a step to change what is behind you.',
         );
       }
-      store.steps[current] = currentStep.copyWith(isDone: true);
     }
 
     store.room = store.room.copyWith(currentStepId: stepId);
@@ -454,29 +493,15 @@ class LocalRoomRepository implements RoomRepository {
     }
 
     if (next == null) {
+      // The pointer stays on the final step rather than moving past the end.
+      // There is no beyond-the-end state to design around or to render badly.
       throw const GatherRuleException(
         "This is the last step. You're at the end of the plan.",
       );
     }
-    if (current != null) {
-      store.steps[current.id] = current.copyWith(isDone: true);
-    }
+
     store.room = store.room.copyWith(currentStepId: next.id);
     store.emit(RoomEvent.stepChanged(next.id));
-  }
-
-  @override
-  Future<void> setStepDone({
-    required String code,
-    required int stepId,
-    required bool isDone,
-  }) async {
-    final store = _store(code);
-    final step = store.steps[stepId];
-    if (step == null) {
-      throw const GatherRuleException('That step is no longer in the plan.');
-    }
-    store.steps[stepId] = step.copyWith(isDone: isDone);
   }
 
   @override
@@ -516,9 +541,7 @@ class LocalRoomRepository implements RoomRepository {
   void _requireOwner(_RoomStore store, int memberId) {
     final member = _requireMember(store, memberId);
     if (!member.isOwner) {
-      throw const GatherRuleException(
-        'Only the organizer can do that.',
-      );
+      throw const GatherRuleException('Only the organizer can do that.');
     }
   }
 
@@ -526,7 +549,12 @@ class LocalRoomRepository implements RoomRepository {
     final ordered = store.steps.values.toList()
       ..sort((a, b) => a.position.compareTo(b.position));
     for (var i = 0; i < ordered.length; i++) {
-      store.steps[ordered[i].id] = ordered[i].copyWith(position: i);
+      store.steps[ordered[i].id] = AgendaStep(
+        id: ordered[i].id,
+        title: ordered[i].title,
+        at: ordered[i].at,
+        position: i,
+      );
     }
   }
 }
@@ -540,7 +568,8 @@ class _RoomStore {
   final Map<int, AgendaStep> steps = {};
 
   /// Keyed "itemId:memberId", which is exactly the unique index the plan puts
-  /// on `Vote`, so one member can hold at most one vote per item.
+  /// on `Vote`, so one member can hold at most one vote per item. The row set
+  /// is kept for the constraint only; counts live on [Item.voteCount].
   final Map<String, DateTime> votes = {};
 
   final StreamController<RoomEvent> events =
@@ -551,15 +580,17 @@ class _RoomStore {
   int _nextItemId = 1;
   int _nextStepId = 1;
 
+  /// Item ids in the order they were showing when the freeze began. Null until
+  /// the vote enters its final seconds.
+  List<int>? frozenOrder;
+
   int get checkedInCount => members.values.where((m) => m.isCheckedIn).length;
 
-  int voteCount(int itemId) {
-    var count = 0;
-    final prefix = '$itemId:';
-    for (final key in votes.keys) {
-      if (key.startsWith(prefix)) count++;
+  Member? memberByUserId(String userId) {
+    for (final member in members.values) {
+      if (member.userId == userId) return member;
     }
-    return count;
+    return null;
   }
 
   void emit(RoomEvent event) {
@@ -600,6 +631,7 @@ class _RoomStore {
       text: text,
       isAnonymous: isAnonymous,
       createdAt: DateTime.now(),
+      voteCount: 0,
     );
     items[item.id] = item;
     return item;
@@ -614,38 +646,87 @@ class _RoomStore {
       id: _nextStepId++,
       title: title,
       position: position,
-      isDone: false,
       at: at,
     );
     steps[step.id] = step;
     return step;
   }
 
-  RoomSnapshot snapshot({int? viewerMemberId}) {
-    final membersSorted = members.values.toList()
-      ..sort((a, b) => a.joinedAt.compareTo(b.joinedAt));
-    final itemsSorted = items.values.toList()
+  /// Milliseconds left, measured here so every client agrees. Null unless a
+  /// vote is actually running.
+  int? get votingRemainingMs {
+    if (room.status != RoomStatus.voting) return null;
+    final endsAt = room.votingEndsAt;
+    if (endsAt == null) return null;
+    final remaining = endsAt.difference(DateTime.now()).inMilliseconds;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  /// The order items are rendered in. The server owns this: re-sorting on the
+  /// client is how a list ends up reshuffling under someone's thumb.
+  ///
+  /// Before a vote, oldest first. While voting, most votes first until the
+  /// freeze. During the final seconds, frozen. After the close, most votes
+  /// first again for the result.
+  List<Item> orderedItems(Duration freeze) {
+    final byCreated = items.values.toList()
       ..sort((a, b) {
         final byTime = a.createdAt.compareTo(b.createdAt);
         return byTime != 0 ? byTime : a.id.compareTo(b.id);
       });
+
+    if (room.status == RoomStatus.open) return byCreated;
+
+    final remaining = votingRemainingMs;
+    final inFreeze =
+        room.isVoting &&
+        remaining != null &&
+        remaining <= freeze.inMilliseconds;
+
+    if (inFreeze) {
+      frozenOrder ??= byCreated.map((i) => i.id).toList();
+      final byId = {for (final item in items.values) item.id: item};
+      return [
+        for (final id in frozenOrder!)
+          if (byId[id] != null) byId[id]!,
+      ];
+    }
+
+    frozenOrder = null;
+    final byVotes = [...byCreated]
+      ..sort((a, b) {
+        final byCount = b.voteCount.compareTo(a.voteCount);
+        return byCount != 0 ? byCount : a.id.compareTo(b.id);
+      });
+    return byVotes;
+  }
+
+  RoomSnapshot snapshot({int? viewerMemberId, required Duration freeze}) {
+    final membersSorted = members.values.toList()
+      ..sort((a, b) => a.joinedAt.compareTo(b.joinedAt));
     final stepsSorted = steps.values.toList()
       ..sort((a, b) => a.position.compareTo(b.position));
+
+    final viewer = viewerMemberId == null ? null : members[viewerMemberId];
+    final canSeeAuthors = viewer?.isOwner ?? false;
 
     return RoomSnapshot(
       room: room,
       members: membersSorted,
       items: [
-        for (final item in itemsSorted)
+        for (final item in orderedItems(freeze))
           ItemView(
             item: item,
-            votes: voteCount(item.id),
+            votes: item.voteCount,
             votedByMe: viewerMemberId != null &&
                 votes.containsKey('${item.id}:$viewerMemberId'),
+            canSeeAuthor: canSeeAuthors,
           ),
       ],
       steps: stepsSorted,
       viewerMemberId: viewerMemberId,
+      viewerGuestToken: viewer?.userId,
+      votingRemainingMs: votingRemainingMs,
     );
   }
 }

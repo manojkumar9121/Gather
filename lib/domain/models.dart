@@ -173,6 +173,7 @@ class Item {
     required this.text,
     required this.isAnonymous,
     required this.createdAt,
+    required this.voteCount,
   });
 
   final int id;
@@ -181,6 +182,23 @@ class Item {
   final String text;
   final bool isAnonymous;
   final DateTime createdAt;
+
+  /// Denormalised on purpose. Counting `Vote` rows on every broadcast and on
+  /// every snapshot is wasted work; this is incremented in the same operation
+  /// that inserts or deletes the vote, so both reads stay O(1).
+  final int voteCount;
+
+  Item copyWith({int? voteCount}) {
+    return Item(
+      id: id,
+      authorMemberId: authorMemberId,
+      kind: kind,
+      text: text,
+      isAnonymous: isAnonymous,
+      createdAt: createdAt,
+      voteCount: voteCount ?? this.voteCount,
+    );
+  }
 }
 
 class Vote {
@@ -196,12 +214,16 @@ class Vote {
 }
 
 /// One step in the room's shared agenda.
+///
+/// There is deliberately no `isDone` flag. Done-ness is derived from
+/// [Room.currentStepId] and nothing else, so the pointer can never disagree
+/// with a separate flag. Marking a step done without advancing the room is a
+/// different feature and is not in this cut.
 class AgendaStep {
   const AgendaStep({
     required this.id,
     required this.title,
     required this.position,
-    required this.isDone,
     this.at,
   });
 
@@ -212,17 +234,6 @@ class AgendaStep {
   /// deadline; the room's real clock lives on [Room.votingEndsAt].
   final DateTime? at;
   final int position;
-  final bool isDone;
-
-  AgendaStep copyWith({bool? isDone, int? position}) {
-    return AgendaStep(
-      id: id,
-      title: title,
-      at: at,
-      position: position ?? this.position,
-      isDone: isDone ?? this.isDone,
-    );
-  }
 }
 
 /// Where a step sits relative to the room's current pointer. Named to avoid

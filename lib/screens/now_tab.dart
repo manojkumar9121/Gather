@@ -23,6 +23,7 @@ class NowTab extends StatelessWidget {
     final template = templateFor(snapshot.room.type);
     final current = snapshot.currentStep;
     final next = snapshot.nextStep;
+    final isOwner = snapshot.viewer?.isOwner ?? false;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(Gap.lg, Gap.lg, Gap.lg, Gap.xxl),
@@ -48,7 +49,7 @@ class NowTab extends StatelessWidget {
         ),
         const SizedBox(height: Gap.lg),
         if (snapshot.steps.isEmpty)
-          _EmptyNote(
+          const _EmptyNote(
             message:
                 'No plan yet. The organizer can add the steps everyone should '
                 'expect.',
@@ -58,14 +59,11 @@ class NowTab extends StatelessWidget {
             _StepRow(
               step: step,
               state: snapshot.stateFor(step),
-              isOwner: snapshot.viewer?.isOwner ?? false,
-              onTap: snapshot.viewer?.isOwner ?? false
+              // Only the organizer moves the plan, and only forward.
+              onTap: isOwner && snapshot.stateFor(step) ==
+                      AgendaStepState.upcoming
                   ? () => controller.setCurrentStep(step.id)
                   : null,
-              onToggleDone: () => controller.setStepDone(
-                step.id,
-                !step.isDone,
-              ),
             ),
       ],
     );
@@ -101,7 +99,11 @@ class _CheckInCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.groups_rounded, color: GatherColors.gold, size: 22),
+              const Icon(
+                Icons.groups_rounded,
+                color: GatherColors.gold,
+                size: 22,
+              ),
               const SizedBox(width: Gap.sm),
               Expanded(
                 child: Text(
@@ -132,8 +134,11 @@ class _CheckInCard extends StatelessWidget {
             const SizedBox(height: Gap.md),
             Row(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: GatherColors.success, size: 20),
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: GatherColors.success,
+                  size: 20,
+                ),
                 const SizedBox(width: Gap.sm),
                 Text(
                   "You're checked in",
@@ -167,7 +172,8 @@ class _Avatars extends StatelessWidget {
     }
 
     final present = members.where((m) => m.isCheckedIn).toList();
-    final shown = (present.isEmpty ? members : present).take(8).toList();
+    final pool = present.isEmpty ? members : present;
+    final shown = pool.take(8).toList();
 
     return Wrap(
       spacing: Gap.sm,
@@ -186,7 +192,7 @@ class _Avatars extends StatelessWidget {
             ),
             child: Text(member.emoji, style: const TextStyle(fontSize: 19)),
           ),
-        if ((present.isEmpty ? members.length : present.length) > shown.length)
+        if (pool.length > shown.length)
           Container(
             width: 40,
             height: 40,
@@ -196,7 +202,7 @@ class _Avatars extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: Text(
-              '+${(present.isEmpty ? members.length : present.length) - shown.length}',
+              '+${pool.length - shown.length}',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -273,25 +279,37 @@ class _CurrentStepCard extends StatelessWidget {
               height: 1.2,
             ),
           ),
-          if (next != null) ...[
-            const SizedBox(height: Gap.sm),
-            Row(
-              children: [
-                const Icon(Icons.arrow_forward_rounded,
-                    size: 16, color: GatherColors.muted),
-                const SizedBox(width: Gap.xs),
-                Expanded(
-                  child: Text(
-                    'Next: ${next!.title}',
-                    style: const TextStyle(
-                      color: GatherColors.muted,
-                      fontSize: 15,
-                    ),
+          const SizedBox(height: Gap.sm),
+          Row(
+            children: [
+              Icon(
+                next == null
+                    ? Icons.flag_rounded
+                    : Icons.arrow_forward_rounded,
+                size: 16,
+                color: next == null
+                    ? GatherColors.goldDeep
+                    : GatherColors.muted,
+              ),
+              const SizedBox(width: Gap.xs),
+              Expanded(
+                child: Text(
+                  // The pointer stays on the last step rather than running past
+                  // the end, so "last step" is a state, not a crash.
+                  next == null
+                      ? 'Last step'
+                      : 'Next: ${next!.title}',
+                  style: TextStyle(
+                    color: next == null
+                        ? GatherColors.goldDeep
+                        : GatherColors.muted,
+                    fontSize: 15,
+                    fontWeight: next == null ? FontWeight.w700 : null,
                   ),
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
           const SizedBox(height: Gap.md),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
@@ -299,7 +317,9 @@ class _CurrentStepCard extends StatelessWidget {
               value: progress,
               minHeight: 8,
               backgroundColor: GatherColors.muted.withValues(alpha: 0.25),
-              valueColor: const AlwaysStoppedAnimation(GatherColors.ultramarine),
+              valueColor: const AlwaysStoppedAnimation(
+                GatherColors.ultramarine,
+              ),
             ),
           ),
           const SizedBox(height: Gap.xs),
@@ -313,19 +333,17 @@ class _CurrentStepCard extends StatelessWidget {
   }
 }
 
+/// Step state is derived from the room's current pointer. There is no stored
+/// flag to disagree with it, and nothing here can be ticked off by hand.
 class _StepRow extends StatelessWidget {
   const _StepRow({
     required this.step,
     required this.state,
-    required this.isOwner,
-    required this.onToggleDone,
     this.onTap,
   });
 
   final AgendaStep step;
   final AgendaStepState state;
-  final bool isOwner;
-  final VoidCallback onToggleDone;
   final VoidCallback? onTap;
 
   @override
@@ -336,7 +354,9 @@ class _StepRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: Gap.sm),
       child: Material(
-        color: isCurrent ? GatherColors.gold.withValues(alpha: 0.14) : Colors.white,
+        color: isCurrent
+            ? GatherColors.gold.withValues(alpha: 0.14)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           onTap: onTap,
@@ -355,26 +375,34 @@ class _StepRow extends StatelessWidget {
             ),
             child: Row(
               children: [
-                GestureDetector(
-                  onTap: onToggleDone,
-                  child: Container(
-                    width: 30,
-                    height: 30,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: isDone
-                          ? GatherColors.success
-                          : Colors.transparent,
-                      shape: BoxShape.circle,
-                      border: isDone
-                          ? null
-                          : Border.all(color: GatherColors.muted, width: 2),
-                    ),
-                    child: isDone
-                        ? const Icon(Icons.check,
-                            size: 18, color: Colors.white)
-                        : null,
+                Container(
+                  width: 30,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isDone
+                        ? GatherColors.success
+                        : isCurrent
+                        ? GatherColors.gold
+                        : Colors.transparent,
+                    shape: BoxShape.circle,
+                    border: isDone || isCurrent
+                        ? null
+                        : Border.all(color: GatherColors.muted, width: 2),
                   ),
+                  child: isDone
+                      ? const Icon(
+                          Icons.check,
+                          size: 18,
+                          color: Colors.white,
+                        )
+                      : isCurrent
+                      ? const Icon(
+                          Icons.play_arrow_rounded,
+                          size: 18,
+                          color: GatherColors.ultramarineInk,
+                        )
+                      : null,
                 ),
                 const SizedBox(width: Gap.md),
                 Expanded(
@@ -382,7 +410,9 @@ class _StepRow extends StatelessWidget {
                     step.title,
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
+                      fontWeight: isCurrent
+                          ? FontWeight.w800
+                          : FontWeight.w500,
                       color: isDone
                           ? GatherColors.muted
                           : GatherColors.ultramarineInk,
@@ -409,9 +439,11 @@ class _StepRow extends StatelessWidget {
                       ),
                     ),
                   )
-                else if (isOwner)
-                  const Icon(Icons.chevron_right_rounded,
-                      color: GatherColors.muted),
+                else if (onTap != null)
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: GatherColors.muted,
+                  ),
               ],
             ),
           ),

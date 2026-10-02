@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- mobile_scanner needs this to open the camera for the in-app scan. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:label="gather"
         android:name="${applicationName}"
@@ -23,6 +26,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Lets a stock camera app open Gather straight from the room QR.
+                 Without this, scanning the code with anything other than the
+                 in-app scanner goes nowhere. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="gather" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
