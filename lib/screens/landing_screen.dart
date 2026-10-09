@@ -162,7 +162,7 @@ class LandingScreen extends StatelessWidget {
   }
 }
 
-/// Large glowing orb logo for Aurora Glass landing.
+/// Large glowing orb logo for Aurora Glass landing — uses actual app logo.
 class _AuroraOrbLogo extends StatelessWidget {
   const _AuroraOrbLogo();
 
@@ -176,68 +176,69 @@ class _AuroraOrbLogo extends StatelessWidget {
           children: [
             // Purple bloom on left
             Container(
-              width: 160,
-              height: 160,
+              width: 180,
+              height: 180,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const RadialGradient(
-                  center: Alignment(-0.3, 0.2),
-                  radius: 0.9,
+                  center: Alignment(-0.35, 0.2),
+                  radius: 1.0,
                   colors: [
                     Color(0xB08040FF),
-                    Color(0x006040FF),
+                    Color(0x2040A0FF),
                     Color(0x00000000),
                   ],
-                  stops: [0.0, 0.5, 1.0],
+                  stops: [0.0, 0.35, 1.0],
                 ),
               ),
             ),
             // Blue bloom on right
             Container(
-              width: 140,
-              height: 140,
+              width: 160,
+              height: 160,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const RadialGradient(
-                  center: Alignment(0.6, -0.2),
-                  radius: 0.9,
+                  center: Alignment(0.7, -0.2),
+                  radius: 1.0,
                   colors: [
                     Color(0xB03A2FE0),
-                    Color(0x003A2FE0),
+                    Color(0x203A5AFF),
                     Color(0x00000000),
                   ],
-                  stops: [0.0, 0.5, 1.0],
+                  stops: [0.0, 0.35, 1.0],
                 ),
               ),
             ),
-            // Central gold dot + dots ring (logo)
+            // Actual app logo image with gold glow
             Container(
-              width: 96,
-              height: 96,
+              width: 110,
+              height: 110,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    GatherColors.auroraGold,
-                    GatherColors.auroraGoldDeep,
-                  ],
-                ),
                 boxShadow: [
                   BoxShadow(
-                    color: Color(0x66FFC83D),
-                    blurRadius: 30,
-                    spreadRadius: 4,
-                    offset: Offset(0, 4),
+                    color: Color(0xAAFFC83D),
+                    blurRadius: 36,
+                    spreadRadius: 8,
+                    offset: Offset(0, 6),
+                  ),
+                  BoxShadow(
+                    color: Color(0x55FFC83D),
+                    blurRadius: 60,
+                    spreadRadius: 20,
+                    offset: Offset(0, 0),
                   ),
                 ],
               ),
-              alignment: Alignment.center,
-              child: const Icon(
-                Icons.fiber_manual_record,
-                size: 34,
-                color: GatherColors.blackBase,
+              padding: const EdgeInsets.all(12),
+              child: ClipOval(
+                child: Image.asset(
+                  'gather-logo-1024.png',
+                  width: 86,
+                  height: 86,
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
           ],

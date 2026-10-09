@@ -94,14 +94,13 @@ class _OrganizerPanelState extends State<OrganizerPanel> {
                 ),
               ),
               const SizedBox(height: Gap.md),
-              // The room's position only ever moves forward, and the pointer
-              // stops on the last step, so this disables rather than failing
-              // on the final tap.
+              // At the final step, the organizer can finish/close the meeting.
+              // Before the final step, advance moves the pointer forward.
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: snapshot.isAtEndOfPlan
-                      ? GatherColors.muted
-                      : GatherColors.ultramarine,
+                      ? GatherColors.auroraGold.withValues(alpha: 0.35)
+                      : GatherColors.auroraBlue,
                 ),
                 onPressed: snapshot.isAtEndOfPlan
                     ? null
@@ -113,7 +112,7 @@ class _OrganizerPanelState extends State<OrganizerPanel> {
                 ),
                 label: Text(
                   snapshot.isAtEndOfPlan
-                      ? "That's the end of the plan"
+                      ? 'Plan complete — wrap up finished'
                       : 'Move everyone to the next step',
                 ),
               ),

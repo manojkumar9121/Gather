@@ -147,14 +147,22 @@ class _TypeCard extends StatelessWidget {
             horizontal: Gap.sm,
           ),
           decoration: BoxDecoration(
-            color: isSelected ? GatherColors.ultramarine : Colors.white,
-            borderRadius: BorderRadius.circular(18),
+            color: isSelected ? GatherColors.auroraGold : GatherColors.blackSurface.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(
               color: isSelected
-                  ? GatherColors.ultramarine
-                  : GatherColors.muted,
+                  ? GatherColors.auroraGold
+                  : const Color(0x33FFFFFF),
               width: isSelected ? 2 : 1,
             ),
+            boxShadow: isSelected ? [
+              const BoxShadow(
+                color: Color(0x55FFC83D),
+                blurRadius: 16,
+                spreadRadius: 2,
+                offset: Offset(0, 4),
+              ),
+            ] : [],
           ),
           child: Column(
             children: [
@@ -167,8 +175,8 @@ class _TypeCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                   fontSize: 15,
                   color: isSelected
-                      ? Colors.white
-                      : GatherColors.ultramarineInk,
+                      ? GatherColors.blackBase
+                      : GatherColors.whiteText,
                 ),
               ),
               const SizedBox(height: 2),
@@ -178,8 +186,8 @@ class _TypeCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   color: isSelected
-                      ? GatherColors.offWhite
-                      : GatherColors.muted,
+                      ? GatherColors.blackBase.withValues(alpha: 0.75)
+                      : GatherColors.mutedText,
                 ),
               ),
             ],

@@ -6,6 +6,8 @@ import '../domain/room_event.dart';
 import '../domain/room_snapshot.dart';
 import '../domain/room_template.dart';
 import 'room_repository.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 /// In-memory room store. Holds every rule the server will hold, so the domain
 /// behaviour is identical once the backend takes over.
@@ -17,7 +19,9 @@ class LocalRoomRepository implements RoomRepository {
     Random? random,
     this.minimumVotingDuration = const Duration(seconds: 5),
     this.voteOrderFreeze = const Duration(seconds: 10),
-  }) : _random = random ?? Random.secure();
+  }) : _random = random ?? Random.secure() {
+    unawaited(_loadRooms());
+  }
 
   final Random _random;
   final Map<String, _RoomStore> _rooms = {};
@@ -141,6 +145,7 @@ class LocalRoomRepository implements RoomRepository {
       role: MemberRole.owner,
     );
     store.ownerMemberId = owner.id;
+    unawaited(_saveRooms());
 
     return store.snapshot(
       viewerMemberId: owner.id,
@@ -191,6 +196,7 @@ class LocalRoomRepository implements RoomRepository {
       );
     }
     store.emit(RoomEvent.memberJoined(member.id));
+    unawaited(_saveRooms());
 
     return store.snapshot(
       viewerMemberId: member.id,
@@ -555,6 +561,71 @@ class LocalRoomRepository implements RoomRepository {
         at: ordered[i].at,
         position: i,
       );
+    }
+  }
+
+  // --- persistence ---------------------------------------------------------
+
+  Future<void> _loadRooms() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('gather.rooms');
+      if (data != null && data.isNotEmpty) {
+        final list = jsonDecode(data) as List<dynamic>;
+        for (final item in list) {
+          final map = item as Map<String, dynamic>;
+          final code = map['code'] as String;
+          if (_rooms.containsKey(code)) continue;
+          // Basic restore: create a placeholder store for persistence demo
+          // In production this would fully deserialize, but for local mode
+          // we ensure the room code survives across restarts.
+          final title = map['title'] ?? 'Restored room';
+          final typeName = map['type'] ?? 'meetup';
+          final type = RoomType.values.firstWhere(
+            (t) => t.wireName == typeName,
+            orElse: () => RoomType.meetup,
+          );
+          final store = _RoomStore(
+            Room(
+              code: code,
+              title: title,
+              type: type,
+              ownerId: 'local-owner',
+              status: RoomStatus.open,
+              createdAt: DateTime.parse(map['createdAt'] ?? DateTime.now().toIso8601String()),
+              expectedCount: map['expectedCount'] as int?,
+              winnerItemId: map['winnerItemId'] as int?,
+              wasTie: (map['wasTie'] ?? false) as bool,
+              currentStepId: map['currentStepId'] as int?,
+            ),
+          );
+          _rooms[code] = store;
+        }
+      }
+    } catch (_) {
+      // Persistence best-effort for local mode.
+    }
+  }
+
+  Future<void> _saveRooms() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = <Map<String, dynamic>>[];
+      for (final entry in _rooms.entries) {
+        final s = entry.value;
+        list.add({
+          'code': s.room.code,
+          'title': s.room.title,
+          'type': s.room.type.wireName,
+          'createdAt': s.room.createdAt.toIso8601String(),
+          'expectedCount': s.room.expectedCount,
+          'currentStepId': s.room.currentStepId,
+          'status': s.room.status.wireName,
+        });
+      }
+      await prefs.setString('gather.rooms', jsonEncode(list));
+    } catch (_) {
+      // Persistence best-effort for local mode.
     }
   }
 }

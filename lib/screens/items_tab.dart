@@ -127,8 +127,27 @@ class _ResultCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(Gap.lg),
       decoration: BoxDecoration(
-        color: kStageBackground,
-        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            GatherColors.auroraGold.withValues(alpha: 0.22),
+            GatherColors.auroraGold.withValues(alpha: 0.06),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(
+          color: GatherColors.auroraGold.withValues(alpha: 0.55),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: GatherColors.auroraGold.withValues(alpha: 0.45),
+            blurRadius: 20,
+            spreadRadius: -10,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -216,11 +235,11 @@ class _ItemRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.sm, Gap.sm),
         decoration: BoxDecoration(
           color: view.votedByMe
-              ? GatherColors.gold.withValues(alpha: 0.16)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(18),
+              ? GatherColors.auroraGold.withValues(alpha: 0.16)
+              : GatherColors.blackSurface.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: view.votedByMe ? GatherColors.goldDeep : GatherColors.muted,
+            color: view.votedByMe ? GatherColors.auroraGold : const Color(0x33FFFFFF),
             width: view.votedByMe ? 2 : 1,
           ),
         ),
@@ -239,6 +258,7 @@ class _ItemRow extends StatelessWidget {
                         fontSize: 17,
                         fontWeight: FontWeight.w600,
                         height: 1.3,
+                        color: GatherColors.whiteText,
                       ),
                     ),
                     const SizedBox(height: Gap.xs),
