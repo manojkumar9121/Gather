@@ -266,7 +266,7 @@ class _ItemRow extends StatelessWidget {
                       byline,
                       style: const TextStyle(
                         fontSize: 13,
-                        color: GatherColors.muted,
+                        color: GatherColors.mutedText,
                       ),
                     ),
                   ],
