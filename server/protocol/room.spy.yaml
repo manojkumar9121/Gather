@@ -1,0 +1,21 @@
+### Room data model matching the Gather build plan.
+class: Room
+table: gather_room
+fields:
+  code: String
+  title: String
+  type: String
+  ownerId: String
+  status: String
+  createdAt: DateTime
+  expectedCount: int?
+  votingEndsAt: DateTime?
+  winnerItemId: int?
+  wasTie: bool
+  currentStepId: int?
+indexes:
+  gather_room_code_idx:
+    fields: code
+    unique: true
+  gather_room_owner_idx:
+    fields: ownerId

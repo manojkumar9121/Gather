@@ -1,0 +1,6 @@
+### Gather server endpoints.
+### Defines endpoints for room management, streaming, and auth.
+
+# Endpoints are implemented in endpoint/gather_endpoint.dart
+# The server uses serverpod auth (email/password) for organizers.
+# Guests use device identity (guestId UUID) stored locally.

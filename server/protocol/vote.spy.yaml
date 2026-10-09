@@ -1,0 +1,13 @@
+### Vote by a member on an item. Unique (itemId, memberId).
+class: Vote
+table: gather_vote
+fields:
+  itemId: int
+  memberId: int
+  createdAt: DateTime
+indexes:
+  gather_vote_item_member_idx:
+    fields: itemId, memberId
+    unique: true
+  gather_vote_item_idx:
+    fields: itemId

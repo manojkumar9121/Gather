@@ -1,0 +1,11 @@
+### Agenda step in the shared room plan.
+class: AgendaStep
+table: gather_agenda_step
+fields:
+  roomId: int
+  title: String
+  at: DateTime?
+  position: int
+indexes:
+  gather_agenda_step_room_idx:
+    fields: roomId

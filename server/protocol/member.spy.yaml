@@ -1,0 +1,17 @@
+### Member of a room. For guests, userId is a device-generated identity.
+class: Member
+table: gather_member
+fields:
+  roomId: int
+  userId: String
+  displayName: String
+  emoji: String
+  role: String
+  joinedAt: DateTime
+  checkedInAt: DateTime?
+indexes:
+  gather_member_room_idx:
+    fields: roomId
+  gather_member_user_room_idx:
+    fields: userId, roomId
+    unique: true

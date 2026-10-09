@@ -1,0 +1,14 @@
+### A single upvotable item in a room.
+class: Item
+table: gather_item
+fields:
+  roomId: int
+  authorMemberId: int
+  kind: String
+  text: String
+  isAnonymous: bool
+  createdAt: DateTime
+  voteCount: int
+indexes:
+  gather_item_room_idx:
+    fields: roomId
