@@ -58,9 +58,9 @@ server/.serverpod/
 
 # Design / planning artifacts (not needed in source)
 *.html
-gather-build-plan.md
 agents.md
 
 # App screenshots and demo assets (large, not source code)
 app screenshots/
 docs/app_icon_playstore.png
+docs/*.png
