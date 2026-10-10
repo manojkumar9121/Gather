@@ -64,3 +64,6 @@ agents.md
 app screenshots/
 docs/app_icon_playstore.png
 docs/*.png
+
+# Flutter web build artifacts
+web/build/
