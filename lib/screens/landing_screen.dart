@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../data/guest_identity.dart';
+import '../app.dart';
 import '../theme.dart';
 import 'create_room_screen.dart';
 import 'join_screen.dart';
 
 class LandingScreen extends StatelessWidget {
-  const LandingScreen({super.key, this.identity});
-
-  final GuestIdentity? identity;
+  const LandingScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Read through the scope rather than taking the identity as a constructor
+    // argument. `MaterialApp.home` becomes a Navigator route once, so a new
+    // `home:` widget on rebuild does not refresh the route already on screen --
+    // which is why saving a room used to leave this page stale. An inherited
+    // widget does reach the live route.
+    final identity = IdentityScope.of(context).identity;
     final lastRoom = identity?.lastRoomCode;
 
     return Scaffold(
@@ -113,7 +117,9 @@ class LandingScreen extends StatelessWidget {
                     backgroundColor: GatherColors.auroraGold,
                     foregroundColor: GatherColors.blackBase,
                     elevation: 6,
-                    shadowColor: GatherColors.auroraGold.withValues(alpha: 0.55),
+                    shadowColor: GatherColors.auroraGold.withValues(
+                      alpha: 0.55,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(22),
@@ -121,10 +127,7 @@ class LandingScreen extends StatelessWidget {
                   ),
                   child: const Text(
                     'Create a room',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                   ),
                 ),
                 const SizedBox(height: Gap.sm),
@@ -243,18 +246,6 @@ class _AuroraOrbLogo extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: Gap.md),
-        // Wordmark text — white with gold glow
-        const Text(
-          'Gather',
-          style: TextStyle(
-            fontSize: 46,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -2.4,
-            height: 1.0,
-            color: GatherColors.whiteText,
-          ),
-        ),
       ],
     );
   }
@@ -285,10 +276,7 @@ class _HowItWorks extends StatelessWidget {
               decoration: BoxDecoration(
                 color: GatherColors.blackSurface.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0x22FFFFFF),
-                  width: 1,
-                ),
+                border: Border.all(color: const Color(0x22FFFFFF), width: 1),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -48,7 +48,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       return;
     }
     if (_titleController.text.trim().isEmpty) {
-      setState(() => _error = 'Give the room a name so people know what it is.');
+      setState(
+        () => _error = 'Give the room a name so people know what it is.',
+      );
       return;
     }
 
@@ -61,6 +63,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     // Read the scope before the awaits to avoid using a context across the
     // async gap.
     final identityStore = IdentityScope.of(context).store;
+    final guestId = IdentityScope.of(context).identity?.guestId;
     final navigator = Navigator.of(context);
     final expected = int.tryParse(_expectedController.text.trim());
 
@@ -71,6 +74,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         ownerName: _nameController.text,
         ownerEmoji: _emoji,
         expectedCount: expected,
+        // Ties the organizer to this phone so rejoining from it keeps the
+        // organizer role instead of arriving as a guest.
+        guestId: guestId,
       );
       // Remember this phone's details and the room it just made, so a restart
       // lands the organizer back where they were. Deliberately not awaited:
@@ -242,6 +248,5 @@ class ErrorNote extends StatelessWidget {
   final String message;
 
   @override
-  Widget build(BuildContext context) =>
-      _ErrorNote(message);
+  Widget build(BuildContext context) => _ErrorNote(message);
 }

@@ -21,12 +21,16 @@ abstract class RoomRepository {
   /// countdown does not depend on the phone's clock.
   Future<RoomSnapshot> getRoomState(String code, {int? viewerMemberId});
 
+  /// [guestId] is this device's identity. It is attached to the owner so the
+  /// organizer who later rejoins from the same phone is recognised as the
+  /// organizer again, rather than demoted to a guest in their own room.
   Future<RoomSnapshot> createRoom({
     required String title,
     required RoomType type,
     required String ownerName,
     required String ownerEmoji,
     int? expectedCount,
+    String? guestId,
   });
 
   /// Joins a room, or rejoins it.
@@ -91,6 +95,15 @@ abstract class RoomRepository {
   /// Moves to the next step. There is no "past the end" state; at the final
   /// step the pointer stays put and this reports that there is nothing left.
   Future<void> advanceStep({required String code, required int memberId});
+
+  /// Completes the agenda once on the final step. Idempotent: calling it when
+  /// already complete is a no-op. Only the organizer may call it.
+  Future<void> completePlan({required String code, required int memberId});
+
+  /// Ends the event once the plan is complete. This is the terminal action:
+  /// after it the room is archived and takes no further input. Idempotent, and
+  /// only the organizer may call it.
+  Future<void> endEvent({required String code, required int memberId});
 
   /// Ephemeral. Never stored, never replayed.
   Future<void> sendReaction({

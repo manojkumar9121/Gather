@@ -7,7 +7,7 @@ Gather is a live group room for any get-together. An organizer creates a room an
 ## What it does
 
 - **Guest join:** Scan QR or enter a 5-character code. Type a name, pick an emoji — no account needed.
-- **Organizer sign-in:** Real auth (email/password via Serverpod auth) to create and control rooms.
+- **Organizer sign-in:** Planned (email/password via Serverpod auth). Not yet implemented; the client currently uses device-based guest identity only (`guest_identity.dart`). Real organizer auth requires deploying the server backend.
 - **Live upvotable items:** Questions, suggestions, stops — all covered by one `Item` model.
 - **Timed voting:** Organizer sets a deadline; every phone shows a countdown anchored to the server. Voting closes on the server, winner is revealed.
 - **Live check-in:** Counter visible to everyone. Joining via QR in meetup rooms auto-checks in.
@@ -36,22 +36,23 @@ No server required. The app runs entirely in memory (`LocalRoomRepository`). Eve
 The `server/` folder contains the full Serverpod backend:
 
 - `protocol/*.spy.yaml` — database models: Room, Member, Item, Vote, AgendaStep.
-- `endpoint/gather_endpoint.dart` — endpoints implementing the server-side rules (auth, voting close with scheduled future calls, agenda, reactions, snapshot stream).
+- `endpoint/gather_endpoint.dart` — **Scaffolding only**: stub with no database wiring. Deploying it will produce empty rooms with no members, items, or events because none of the business logic is implemented. See TODO banner in the file and docs/ARCHITECTURE.md for the intended server implementation.
 - `migrations/` — SQL migration setting up PostgreSQL tables.
 - `config/production.yaml` — server configuration.
 
 ### How to deploy it yourself
 
 1. Install prerequisites: Dart SDK (^3.12.2), Serverpod CLI, PostgreSQL.
-2. Configure: `cp server/config/production.yaml server/config/development.yaml`
-3. Generate and migrate:
+2. Configure: `cp server/config/production.yaml server/config/development.yaml` and set `DB_PASSWORD`.
+3. **Implement the endpoint**: The current `gather_endpoint.dart` is a stub — you must wire it to the database models in `protocol/*.spy.yaml` before deploying. See docs/ARCHITECTURE.md for the intended implementation.
+4. Generate and migrate:
    ```bash
    cd server
    serverpod generate
    serverpod create-migration
    ```
-4. Start: `serverpod run`
-5. Point the Flutter client at your server by swapping `LocalRoomRepository` for a `ServerpodRoomRepository` (interface defined in `lib/data/room_repository.dart`).
+5. Start: `serverpod run`
+6. Point the Flutter client at your server by swapping `LocalRoomRepository` for a `ServerpodRoomRepository` (interface defined in `lib/data/room_repository.dart`).
 
 See `docs/deploy/DEPLOYMENT.md` for full instructions.
 
@@ -59,7 +60,7 @@ See `docs/deploy/DEPLOYMENT.md` for full instructions.
 
 - **Auth:** Email/password for organizers (`auth`). Guests persist via device UUID (`guest_identity.dart`, `shared_preferences`).
 - **ORM & Migrations:** `.spy.yaml` models mapped to PostgreSQL. Migration in `migrations/`.
-- **Streaming:** `roomEvents()` broadcasts `RoomEvent` (member joined, vote changed, voting started/closed, step changed, reaction). Clients fetch `getRoomState()` first, then subscribe.
+- **Streaming:** `roomEvents()` broadcasts `RoomEvent` (member joined, vote changed, voting started/closed, step changed, reaction). Clients fetch `getRoomState()` first, then subscribe. This is the intended server architecture; the local mode handles events via in-memory streams.
 - **Scheduled tasks:** Vote close schedules a future call. Lazy close also runs on every read so a missed/restarted job never leaves a room stuck.
 - **File uploads:** Endpoint structure supports image uploads; banner upload is the planned use.
 
@@ -114,7 +115,7 @@ Phase 2-6 (streaming, organizer, reveal, fun layer, real people test, demo): Rea
 flutter test
 ```
 
-Tests cover room rules, code contract, and create flow against the local repository so the same assertions will hold against the server implementation.
+Tests cover room rules, code contract, create flow (repository layer), and controller behavior (timer anchoring, stream re-subscription, error handling). The same assertions will hold against the server implementation.
 
 ## Images / screenshots
 

@@ -39,11 +39,7 @@ class RoomEvent {
     : this(RoomEventType.checkedIn, count: count, total: total);
 
   const RoomEvent.reaction(String emoji, int memberId)
-    : this(
-        RoomEventType.reaction,
-        emoji: emoji,
-        memberId: memberId,
-      );
+    : this(RoomEventType.reaction, emoji: emoji, memberId: memberId);
 
   const RoomEvent.votingStarted(int remainingMs)
     : this(RoomEventType.votingStarted, remainingMs: remainingMs);

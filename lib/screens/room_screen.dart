@@ -23,8 +23,7 @@ class RoomScreen extends StatefulWidget {
   State<RoomScreen> createState() => _RoomScreenState();
 }
 
-class _RoomScreenState extends State<RoomScreen>
-    with WidgetsBindingObserver {
+class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   RoomController? _controller;
   String? _lastError;
 
@@ -58,7 +57,13 @@ class _RoomScreenState extends State<RoomScreen>
     final controller = _controller;
     if (controller == null) return;
     final error = controller.error;
-    if (error != null && error != _lastError) {
+    // Clear the latch as soon as the controller does, otherwise the same
+    // failure can only ever be shown once for the life of the screen.
+    if (error == null) {
+      _lastError = null;
+      return;
+    }
+    if (error != _lastError) {
       _lastError = error;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -99,8 +104,10 @@ class _RoomScreenState extends State<RoomScreen>
               message:
                   controller.error ??
                   "We couldn't find that room. Check the code and try again.",
-              onRetry: () =>
-                  controller.open(widget.code, viewerMemberId: widget.viewerMemberId),
+              onRetry: () => controller.open(
+                widget.code,
+                viewerMemberId: widget.viewerMemberId,
+              ),
             ),
           );
         }
@@ -114,6 +121,7 @@ class _RoomScreenState extends State<RoomScreen>
     );
   }
 }
+
 class _RoomShell extends StatelessWidget {
   const _RoomShell({
     required this.title,
@@ -134,8 +142,15 @@ class _RoomShell extends StatelessWidget {
   Widget build(BuildContext context) {
     if (snapshot == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: child ?? const SizedBox.shrink(),
+        appBar: AppBar(
+          title: Text(title),
+          backgroundColor: GatherColors.blackBase,
+          foregroundColor: GatherColors.whiteText,
+        ),
+        body: Container(
+          color: GatherColors.blackBase,
+          child: child ?? const SizedBox.shrink(),
+        ),
       );
     }
 
@@ -156,18 +171,24 @@ class _RoomShell extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               Text(
                 'Room ${room.code} · $templateLabel',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: GatherColors.muted,
+                  color: GatherColors.mutedText,
                 ),
               ),
             ],
           ),
+          backgroundColor: GatherColors.blackBase.withValues(alpha: 0.8),
+          foregroundColor: GatherColors.whiteText,
+          elevation: 0,
           actions: [
             if (isOwner && controller != null)
               IconButton(
@@ -177,39 +198,78 @@ class _RoomShell extends StatelessWidget {
                   context: context,
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
-                  builder: (_) => OrganizerPanel(
-                    controller: controller!,
-                    snapshot: snapshot!,
+                  // The sheet outlives the build that opened it, so it has to
+                  // subscribe for itself. Reading the snapshot once here would
+                  // leave the organizer looking at a stale plan for as long as
+                  // the sheet stays open.
+                  builder: (_) => ListenableBuilder(
+                    listenable: controller!,
+                    builder: (context, _) {
+                      final live = controller!.snapshot;
+                      if (live == null) return const SizedBox.shrink();
+                      return OrganizerPanel(
+                        controller: controller!,
+                        snapshot: live,
+                      );
+                    },
                   ),
                 ),
               ),
           ],
-          bottom: const TabBar(
-            indicatorColor: GatherColors.gold,
+        ),
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: Color(0x990A0830),
+            border: Border(top: BorderSide(color: Color(0x1FFFFFFF))),
+          ),
+          // Keeps the labels clear of the system navigation bar.
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).padding.bottom,
+          ),
+          child: TabBar(
+            indicatorColor: GatherColors.auroraGold,
             indicatorWeight: 3,
-            labelColor: GatherColors.ultramarine,
-            unselectedLabelColor: GatherColors.muted,
-            labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            labelColor: GatherColors.auroraGold,
+            unselectedLabelColor: GatherColors.mutedText.withValues(
+              alpha: 0.65,
+            ),
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
             tabs: [
-              Tab(text: 'Now'),
-              Tab(text: 'Items'),
-              Tab(text: 'People'),
+              const Tab(text: 'Now'),
+              const Tab(text: 'Items'),
+              const Tab(text: 'People'),
             ],
           ),
         ),
-        body: Column(
-          children: [
-            if (controller != null) VotingBanner(controller: controller!),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  NowTab(controller: controller!, snapshot: snapshot!),
-                  ItemsTab(controller: controller!, snapshot: snapshot!),
-                  PeopleTab(snapshot: snapshot!),
-                ],
-              ),
+        body: Container(
+          // Same aurora bloom the landing screen uses, so stepping into a room
+          // does not read as a different app.
+          decoration: const BoxDecoration(
+            color: GatherColors.blackBase,
+            gradient: RadialGradient(
+              center: Alignment(-0.15, -0.25),
+              radius: 1.4,
+              colors: [Color(0x668040FF), Color(0x00000000)],
+              stops: [0.0, 0.55],
             ),
-          ],
+          ),
+          child: Column(
+            children: [
+              if (controller != null) VotingBanner(controller: controller!),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    NowTab(controller: controller!, snapshot: snapshot!),
+                    ItemsTab(controller: controller!, snapshot: snapshot!),
+                    PeopleTab(snapshot: snapshot!),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -233,12 +293,15 @@ class VotingBanner extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      color: isFinalSeconds ? GatherColors.gold : GatherColors.ultramarine,
+      color: isFinalSeconds ? GatherColors.auroraGold : GatherColors.auroraBlue,
       padding: const EdgeInsets.symmetric(horizontal: Gap.lg, vertical: Gap.md),
       child: Row(
         children: [
-          const Icon(Icons.hourglass_top_rounded,
-              color: Colors.white, size: 20),
+          const Icon(
+            Icons.hourglass_top_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
           const SizedBox(width: Gap.sm),
           Expanded(
             child: Text(
@@ -290,7 +353,11 @@ class _MissingRoom extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(height: 1.4, color: GatherColors.ultramarineInk),
+              style: TextStyle(
+                height: 1.4,
+                color: GatherColors.mutedText.withValues(alpha: 0.9),
+                fontSize: 16,
+              ),
             ),
             const SizedBox(height: Gap.lg),
             FilledButton(onPressed: onRetry, child: const Text('Try again')),

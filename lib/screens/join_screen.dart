@@ -159,9 +159,8 @@ class _JoinScreenState extends State<JoinScreen> {
                       FilteringTextInputFormatter.allow(RegExp('[a-zA-Z0-9]')),
                       LengthLimitingTextInputFormatter(5),
                       TextInputFormatter.withFunction(
-                        (_, next) => next.copyWith(
-                          text: next.text.toUpperCase(),
-                        ),
+                        (_, next) =>
+                            next.copyWith(text: next.text.toUpperCase()),
                       ),
                     ],
                     decoration: const InputDecoration(hintText: 'K7QP2'),

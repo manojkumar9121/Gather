@@ -48,17 +48,18 @@ const double kTapTarget = 58.0;
 
 ThemeData buildGatherTheme() {
   // Aurora Glass color scheme: near-black with gold primary
-  final scheme = ColorScheme.fromSeed(
-    seedColor: GatherColors.auroraBlue,
-    brightness: Brightness.dark,
-  ).copyWith(
-    primary: GatherColors.auroraBlue,
-    secondary: GatherColors.auroraGold,
-    onSecondary: GatherColors.blackBase,
-    surface: GatherColors.blackSurface,
-    error: GatherColors.danger,
-    onSurface: GatherColors.whiteText,
-  );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: GatherColors.auroraBlue,
+        brightness: Brightness.dark,
+      ).copyWith(
+        primary: GatherColors.auroraBlue,
+        secondary: GatherColors.auroraGold,
+        onSecondary: GatherColors.blackBase,
+        surface: GatherColors.blackSurface,
+        error: GatherColors.danger,
+        onSurface: GatherColors.whiteText,
+      );
 
   final base = ThemeData(
     colorScheme: scheme,
@@ -75,29 +76,29 @@ ThemeData buildGatherTheme() {
       shadowColor: GatherColors.blackBase.withValues(alpha: 0.8),
       elevation: 8,
     ),
-    textTheme: base.textTheme.apply(
-      bodyColor: GatherColors.whiteText,
-      displayColor: GatherColors.whiteText,
-      fontFamily: 'Plus Jakarta Sans',
-    ).copyWith(
-      headlineMedium: base.textTheme.headlineMedium?.copyWith(
-        fontWeight: FontWeight.w800,
-        letterSpacing: -1.2,
-      ),
-      bodyLarge: base.textTheme.bodyLarge?.copyWith(
-        color: GatherColors.mutedText,
-        fontWeight: FontWeight.w500,
-      ),
-    ),
+    textTheme: base.textTheme
+        .apply(
+          bodyColor: GatherColors.whiteText,
+          displayColor: GatherColors.whiteText,
+          fontFamily: 'Plus Jakarta Sans',
+        )
+        .copyWith(
+          headlineMedium: base.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -1.2,
+          ),
+          bodyLarge: base.textTheme.bodyLarge?.copyWith(
+            color: GatherColors.mutedText,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
     // Gradient gold primary buttons with glow shadow (Aurora Glass)
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size.fromHeight(kTapTarget),
         backgroundColor: GatherColors.auroraGold,
         foregroundColor: GatherColors.blackBase,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         shadowColor: GatherColors.auroraGold.withValues(alpha: 0.6),
         elevation: 4,
         textStyle: const TextStyle(
@@ -111,15 +112,10 @@ ThemeData buildGatherTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(kTapTarget),
-        side: const BorderSide(
-          color: Color(0x33FFFFFF),
-          width: 1.5,
-        ),
+        side: const BorderSide(color: Color(0x33FFFFFF), width: 1.5),
         foregroundColor: GatherColors.whiteText,
         backgroundColor: GatherColors.blackSurface.withValues(alpha: 0.35),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
       ),
     ),
@@ -127,27 +123,21 @@ ThemeData buildGatherTheme() {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: GatherColors.blackSurface.withValues(alpha: 0.55),
-      contentPadding: const EdgeInsets.symmetric(horizontal: Gap.md, vertical: Gap.md),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: Gap.md,
+        vertical: Gap.md,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(20),
-        borderSide: BorderSide(
-          color: const Color(0x22FFFFFF),
-          width: 1.2,
-        ),
+        borderSide: BorderSide(color: const Color(0x22FFFFFF), width: 1.2),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(20),
-        borderSide: BorderSide(
-          color: const Color(0x22FFFFFF),
-          width: 1.2,
-        ),
+        borderSide: BorderSide(color: const Color(0x22FFFFFF), width: 1.2),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(20),
-        borderSide: const BorderSide(
-          color: GatherColors.auroraGold,
-          width: 2,
-        ),
+        borderSide: const BorderSide(color: GatherColors.auroraGold, width: 2),
       ),
     ),
     // App bar — transparent with frosted feel

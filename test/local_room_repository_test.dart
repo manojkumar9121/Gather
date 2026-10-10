@@ -6,14 +6,21 @@ import 'package:gather/domain/models.dart';
 import 'package:gather/domain/room_event.dart';
 import 'package:gather/domain/room_snapshot.dart';
 import 'package:gather/domain/room_template.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// These cover the rules the plan says the server must enforce, so they are
 /// written against the repository rather than the UI on purpose: when the
 /// backend lands, the same cases have to hold there.
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late LocalRoomRepository repo;
 
   setUp(() {
+    // The repository persists rooms through SharedPreferences, which has no
+    // platform implementation under the test runner. Without this every write
+    // is swallowed and "survives a restart" cases would pass vacuously.
+    SharedPreferences.setMockInitialValues({});
     repo = LocalRoomRepository(
       random: Random(42),
       minimumVotingDuration: const Duration(milliseconds: 30),
@@ -59,10 +66,7 @@ void main() {
       expect(snapshot.steps, hasLength(template.defaultSteps.length));
       expect(snapshot.room.currentStepId, isNotNull);
       expect(snapshot.currentStep?.title, template.defaultSteps.first);
-      expect(
-        snapshot.stateFor(snapshot.currentStep!),
-        AgendaStepState.current,
-      );
+      expect(snapshot.stateFor(snapshot.currentStep!), AgendaStepState.current);
     });
 
     test('the organizer is a member with the owner role', () async {
@@ -126,11 +130,8 @@ void main() {
     test('rejects a blank name', () async {
       final room = await makeRoom();
       expect(
-        () => repo.joinRoom(
-          code: room.room.code,
-          displayName: '  ',
-          emoji: '🔥',
-        ),
+        () =>
+            repo.joinRoom(code: room.room.code, displayName: '  ', emoji: '🔥'),
         throwsA(isA<GatherRuleException>()),
       );
     });
@@ -190,10 +191,8 @@ void main() {
         viaQr: true,
       );
       expect(
-        () => repo.checkIn(
-          code: room.room.code,
-          memberId: guest.viewerMemberId!,
-        ),
+        () =>
+            repo.checkIn(code: room.room.code, memberId: guest.viewerMemberId!),
         throwsA(isA<GatherRuleException>()),
       );
     });
@@ -241,19 +240,39 @@ void main() {
         duration: const Duration(minutes: 5),
       );
 
-      await repo.toggleVote(code: code, memberId: room.viewerMemberId!, itemId: itemId);
-      await repo.toggleVote(code: code, memberId: room.viewerMemberId!, itemId: itemId);
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: itemId,
+      );
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: itemId,
+      );
       expect((await repo.getRoomState(code)).items.first.votes, 0);
 
-      await repo.toggleVote(code: code, memberId: room.viewerMemberId!, itemId: itemId);
-      await repo.toggleVote(code: code, memberId: room.viewerMemberId!, itemId: itemId);
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: itemId,
+      );
+      await repo.toggleVote(
+        code: code,
+        memberId: room.viewerMemberId!,
+        itemId: itemId,
+      );
       // A second member voting proves the constraint is per member, not global.
       final guest = await repo.joinRoom(
         code: code,
         displayName: 'Sam',
         emoji: '🔥',
       );
-      await repo.toggleVote(code: code, memberId: guest.viewerMemberId!, itemId: itemId);
+      await repo.toggleVote(
+        code: code,
+        memberId: guest.viewerMemberId!,
+        itemId: itemId,
+      );
 
       expect((await repo.getRoomState(code)).items.first.votes, 1);
     });
@@ -404,8 +423,16 @@ void main() {
       );
 
       // One vote each on A and B: an exact tie.
-      await repo.toggleVote(code: seed.code, memberId: seed.ownerId, itemId: seed.itemIds[0]);
-      await repo.toggleVote(code: seed.code, memberId: seed.ownerId, itemId: seed.itemIds[1]);
+      await repo.toggleVote(
+        code: seed.code,
+        memberId: seed.ownerId,
+        itemId: seed.itemIds[0],
+      );
+      await repo.toggleVote(
+        code: seed.code,
+        memberId: seed.ownerId,
+        itemId: seed.itemIds[1],
+      );
 
       await repo.closeVoting(code: seed.code, byMemberId: seed.ownerId);
       final final_ = await repo.getRoomState(seed.code);
@@ -521,44 +548,46 @@ void main() {
   });
 
   group('anonymity and ordering', () {
-    test('a guest cannot see who wrote an anonymous item, the owner can',
-        () async {
-      final room = await makeRoom();
-      final code = room.room.code;
-      await repo.addItem(
-        code: code,
-        memberId: room.viewerMemberId!,
-        text: 'A quiet question',
-        isAnonymous: true,
-      );
-      await repo.addItem(
-        code: code,
-        memberId: room.viewerMemberId!,
-        text: 'An ordinary one',
-      );
+    test(
+      'a guest cannot see who wrote an anonymous item, the owner can',
+      () async {
+        final room = await makeRoom();
+        final code = room.room.code;
+        await repo.addItem(
+          code: code,
+          memberId: room.viewerMemberId!,
+          text: 'A quiet question',
+          isAnonymous: true,
+        );
+        await repo.addItem(
+          code: code,
+          memberId: room.viewerMemberId!,
+          text: 'An ordinary one',
+        );
 
-      final ownerView = await repo.getRoomState(
-        code,
-        viewerMemberId: room.viewerMemberId,
-      );
-      expect(
-        ownerView.items.firstWhere((i) => i.item.isAnonymous).canSeeAuthor,
-        isTrue,
-      );
+        final ownerView = await repo.getRoomState(
+          code,
+          viewerMemberId: room.viewerMemberId,
+        );
+        expect(
+          ownerView.items.firstWhere((i) => i.item.isAnonymous).canSeeAuthor,
+          isTrue,
+        );
 
-      final guest = await repo.joinRoom(
-        code: code,
-        displayName: 'Sam',
-        emoji: '🔥',
-      );
-      final guestView = await repo.getRoomState(
-        code,
-        viewerMemberId: guest.viewerMemberId,
-      );
-      final anonymous = guestView.items.firstWhere((i) => i.item.isAnonymous);
-      expect(anonymous.canSeeAuthor, isFalse);
-      expect(anonymous.authorHidden, isTrue);
-    });
+        final guest = await repo.joinRoom(
+          code: code,
+          displayName: 'Sam',
+          emoji: '🔥',
+        );
+        final guestView = await repo.getRoomState(
+          code,
+          viewerMemberId: guest.viewerMemberId,
+        );
+        final anonymous = guestView.items.firstWhere((i) => i.item.isAnonymous);
+        expect(anonymous.canSeeAuthor, isFalse);
+        expect(anonymous.authorHidden, isTrue);
+      },
+    );
 
     test('items stay oldest-first before a vote opens', () async {
       final room = await makeRoom();
@@ -575,10 +604,11 @@ void main() {
         code,
         viewerMemberId: room.viewerMemberId,
       );
-      expect(
-        snapshot.items.map((i) => i.item.text),
-        ['first', 'second', 'third'],
-      );
+      expect(snapshot.items.map((i) => i.item.text), [
+        'first',
+        'second',
+        'third',
+      ]);
     });
 
     test('items reorder by votes while a vote is running', () async {
@@ -591,9 +621,9 @@ void main() {
           text: text,
         );
       }
-      final ids = (await repo.getRoomState(code)).items
-          .map((i) => i.item.id)
-          .toList();
+      final ids = (await repo.getRoomState(
+        code,
+      )).items.map((i) => i.item.id).toList();
 
       await repo.startVoting(
         code: code,
@@ -629,9 +659,9 @@ void main() {
         displayName: 'Sam',
         emoji: '🔥',
       );
-      final ids = (await repo.getRoomState(code)).items
-          .map((i) => i.item.id)
-          .toList();
+      final ids = (await repo.getRoomState(
+        code,
+      )).items.map((i) => i.item.id).toList();
 
       // Long enough to pass through the freeze window, short enough to test.
       await repo.startVoting(
@@ -681,17 +711,10 @@ void main() {
     test('the snapshot carries the server-side remaining time', () async {
       final room = await makeRoom();
       final code = room.room.code;
-      await repo.addItem(
-        code: code,
-        memberId: room.viewerMemberId!,
-        text: 'A',
-      );
+      await repo.addItem(code: code, memberId: room.viewerMemberId!, text: 'A');
 
       // No vote running, so there is no time to report.
-      expect(
-        (await repo.getRoomState(code)).votingRemainingMs,
-        isNull,
-      );
+      expect((await repo.getRoomState(code)).votingRemainingMs, isNull);
 
       await repo.startVoting(
         code: code,
@@ -708,11 +731,7 @@ void main() {
     test('voteChanged carries the denormalised count', () async {
       final room = await makeRoom();
       final code = room.room.code;
-      await repo.addItem(
-        code: code,
-        memberId: room.viewerMemberId!,
-        text: 'A',
-      );
+      await repo.addItem(code: code, memberId: room.viewerMemberId!, text: 'A');
       final itemId = (await repo.getRoomState(code)).items.first.item.id;
 
       final seen = <RoomEvent>[];
@@ -738,18 +757,24 @@ void main() {
   });
 
   group('agenda', () {
-    test('advancing moves the pointer and finishes the step behind it', () async {
-      final room = await makeRoom();
-      final before = await repo.getRoomState(room.room.code);
-      final first = before.currentStep!;
+    test(
+      'advancing moves the pointer and finishes the step behind it',
+      () async {
+        final room = await makeRoom();
+        final before = await repo.getRoomState(room.room.code);
+        final first = before.currentStep!;
 
-      await repo.advanceStep(code: room.room.code, memberId: room.viewerMemberId!);
-      final after = await repo.getRoomState(room.room.code);
+        await repo.advanceStep(
+          code: room.room.code,
+          memberId: room.viewerMemberId!,
+        );
+        final after = await repo.getRoomState(room.room.code);
 
-      expect(after.currentStep!.id, isNot(first.id));
-      expect(after.stateFor(first), AgendaStepState.done);
-      expect(after.currentStepIndex, 1);
-    });
+        expect(after.currentStep!.id, isNot(first.id));
+        expect(after.stateFor(first), AgendaStepState.done);
+        expect(after.currentStepIndex, 1);
+      },
+    );
 
     test('the plan refuses to rewind', () async {
       final room = await makeRoom();
@@ -853,37 +878,39 @@ void main() {
       expect(snapshot.stateFor(steps[1]), AgendaStepState.current);
     });
 
-    test('the pointer stops on the last step rather than running past it',
-        () async {
-      final room = await makeRoom();
-      final code = room.room.code;
-      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+    test(
+      'the pointer stops on the last step rather than running past it',
+      () async {
+        final room = await makeRoom();
+        final code = room.room.code;
+        final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
 
-      for (var i = 0; i < stepCount - 1; i++) {
-        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
-      }
+        for (var i = 0; i < stepCount - 1; i++) {
+          await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+        }
 
-      final atEnd = await repo.getRoomState(code);
-      expect(atEnd.isAtEndOfPlan, isTrue);
-      expect(atEnd.nextStep, isNull);
-      expect(atEnd.currentStep!.position, stepCount - 1);
+        final atEnd = await repo.getRoomState(code);
+        expect(atEnd.isAtEndOfPlan, isTrue);
+        expect(atEnd.nextStep, isNull);
+        expect(atEnd.currentStep!.position, stepCount - 1);
 
-      // One more advance refuses rather than producing a past-the-end state.
-      expect(
-        () => repo.advanceStep(code: code, memberId: room.viewerMemberId!),
-        throwsA(
-          isA<GatherRuleException>().having(
-            (e) => e.message,
-            'message',
-            contains('last step'),
+        // One more advance refuses rather than producing a past-the-end state.
+        expect(
+          () => repo.advanceStep(code: code, memberId: room.viewerMemberId!),
+          throwsA(
+            isA<GatherRuleException>().having(
+              (e) => e.message,
+              'message',
+              contains('last step'),
+            ),
           ),
-        ),
-      );
+        );
 
-      // And the pointer is still on the final step afterwards.
-      final stillThere = await repo.getRoomState(code);
-      expect(stillThere.room.currentStepId, atEnd.room.currentStepId);
-    });
+        // And the pointer is still on the final step afterwards.
+        final stillThere = await repo.getRoomState(code);
+        expect(stillThere.room.currentStepId, atEnd.room.currentStepId);
+      },
+    );
 
     test('adding a step to a room with no steps starts the plan', () async {
       final room = await makeRoom();
@@ -908,5 +935,431 @@ void main() {
       expect(after.steps, hasLength(1));
       expect(after.currentStep?.title, 'Opening act');
     });
+
+    test('advancing through multiple valid steps works end to end', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+
+      final atEnd = await repo.getRoomState(code);
+      expect(atEnd.isAtEndOfPlan, isTrue);
+      expect(atEnd.currentStep!.position, stepCount - 1);
+
+      // Every intermediate step should now be done.
+      for (var i = 0; i < stepCount - 1; i++) {
+        expect(atEnd.stateFor(atEnd.steps[i]), AgendaStepState.done);
+      }
+    });
+
+    test('completing the plan marks it complete on the final step', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+
+      expect((await repo.getRoomState(code)).isPlanCompleted, isFalse);
+
+      await repo.completePlan(code: code, memberId: room.viewerMemberId!);
+      final after = await repo.getRoomState(code);
+
+      expect(after.isPlanCompleted, isTrue);
+      expect(after.room.agendaCompleted, isTrue);
+      expect(after.isAtEndOfPlan, isTrue);
+    });
+
+    test('completing an already-completed agenda is idempotent', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+      await repo.completePlan(code: code, memberId: room.viewerMemberId!);
+      final first = await repo.getRoomState(code);
+      expect(first.isPlanCompleted, isTrue);
+
+      // A second call must not throw or corrupt state.
+      await repo.completePlan(code: code, memberId: room.viewerMemberId!);
+      final second = await repo.getRoomState(code);
+      expect(second.isPlanCompleted, isTrue);
+      expect(second.room.agendaCompleted, isTrue);
+    });
+
+    test('rejecting completion when not on the final step', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+
+      // Still on step 0 of N — cannot complete yet.
+      expect(
+        () => repo.completePlan(code: code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('last step'),
+          ),
+        ),
+      );
+    });
+
+    test('only the organizer can complete the plan', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+
+      final guest = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+      );
+
+      expect(
+        () => repo.completePlan(code: code, memberId: guest.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('Only the organizer'),
+          ),
+        ),
+      );
+    });
+
+    test('advance refuses after plan completion', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+      await repo.completePlan(code: code, memberId: room.viewerMemberId!);
+
+      expect(
+        () => repo.advanceStep(code: code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('already complete'),
+          ),
+        ),
+      );
+    });
+
+    test('empty agenda cannot be completed', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+
+      // Remove all steps so the agenda is empty.
+      for (final step in (await repo.getRoomState(code)).steps) {
+        await repo.removeStep(
+          code: code,
+          memberId: room.viewerMemberId!,
+          stepId: step.id,
+        );
+      }
+
+      expect(
+        () => repo.completePlan(code: code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('last step'),
+          ),
+        ),
+      );
+    });
+
+    test('completed state surfaces to the snapshot correctly', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      }
+      await repo.completePlan(code: code, memberId: room.viewerMemberId!);
+
+      final snapshot = await repo.getRoomState(code);
+      expect(snapshot.isPlanCompleted, isTrue);
+      // A completed plan has nothing in progress: every step reads as done,
+      // including the last one the pointer is parked on.
+      for (final step in snapshot.steps) {
+        expect(snapshot.stateFor(step), AgendaStepState.done);
+      }
+    });
+  });
+
+  group('ending the event', () {
+    /// Drives a room to a completed plan. Returns the original snapshot, because
+    /// `getRoomState` has no viewer attached and the caller needs the owner id.
+    Future<RoomSnapshot> roomWithCompletedPlan() async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+      final stepCount = templateFor(RoomType.meetup).defaultSteps.length;
+      for (var i = 0; i < stepCount - 1; i++) {
+        await repo.advanceStep(code: code, memberId: owner);
+      }
+      await repo.completePlan(code: code, memberId: owner);
+      return room;
+    }
+
+    test('an unfinished plan cannot be ended', () async {
+      final room = await makeRoom();
+
+      expect(
+        () =>
+            repo.endEvent(code: room.room.code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('Finish the plan'),
+          ),
+        ),
+      );
+    });
+
+    test('ending a completed plan marks the event ended', () async {
+      final room = await roomWithCompletedPlan();
+      expect((await repo.getRoomState(room.room.code)).isEventEnded, isFalse);
+
+      await repo.endEvent(code: room.room.code, memberId: room.viewerMemberId!);
+
+      final after = await repo.getRoomState(room.room.code);
+      expect(after.isEventEnded, isTrue);
+    });
+
+    test('ending is idempotent', () async {
+      final room = await roomWithCompletedPlan();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+
+      await repo.endEvent(code: code, memberId: owner);
+      await repo.endEvent(code: code, memberId: owner);
+
+      final after = await repo.getRoomState(code);
+      expect(after.isEventEnded, isTrue);
+    });
+
+    test('only the organizer can end the event', () async {
+      final room = await roomWithCompletedPlan();
+      final guest = await repo.joinRoom(
+        code: room.room.code,
+        displayName: 'Sam',
+        emoji: '🔥',
+      );
+
+      expect(
+        () => repo.endEvent(
+          code: room.room.code,
+          memberId: guest.viewerMemberId!,
+        ),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('organizer'),
+          ),
+        ),
+      );
+    });
+
+    test('an open vote blocks ending the event', () async {
+      final room = await roomWithCompletedPlan();
+      final code = room.room.code;
+      await repo.addItem(
+        code: code,
+        memberId: room.viewerMemberId!,
+        text: 'Option A',
+      );
+      await repo.startVoting(
+        code: code,
+        memberId: room.viewerMemberId!,
+        duration: const Duration(minutes: 1),
+      );
+
+      expect(
+        () => repo.endEvent(code: code, memberId: room.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('vote is still open'),
+          ),
+        ),
+      );
+    });
+
+    test('an ended room takes no new items or votes', () async {
+      final room = await roomWithCompletedPlan();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+      await repo.addItem(code: code, memberId: owner, text: 'Option A');
+      await repo.endEvent(code: code, memberId: owner);
+
+      expect(
+        () => repo.addItem(code: code, memberId: owner, text: 'Too late'),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('event has ended'),
+          ),
+        ),
+      );
+      expect(
+        () => repo.startVoting(
+          code: code,
+          memberId: owner,
+          duration: const Duration(minutes: 1),
+        ),
+        throwsA(isA<GatherRuleException>()),
+      );
+    });
+  });
+
+  group('surviving a restart', () {
+    /// Drives a room to a completed, ended plan and returns its code.
+    Future<String> endedRoom() async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+      final n = templateFor(RoomType.meetup).defaultSteps.length;
+      for (var i = 0; i < n - 1; i++) {
+        await repo.advanceStep(code: code, memberId: owner);
+      }
+      await repo.completePlan(code: code, memberId: owner);
+      await repo.endEvent(code: code, memberId: owner);
+      return code;
+    }
+
+    test('a completed and ended plan is still there after a restart', () async {
+      final code = await endedRoom();
+
+      // A second repository over the same storage is what a relaunch looks
+      // like: the in-memory rooms are gone and only the file remains.
+      final reopened = LocalRoomRepository();
+      await _settle();
+
+      final restored = await reopened.getRoomState(code);
+      expect(restored.isPlanCompleted, isTrue);
+      expect(restored.isEventEnded, isTrue);
+      expect(restored.steps, isNotEmpty);
+    });
+
+    test(
+      'the organizer rejoining from the same phone keeps the role',
+      () async {
+        final room = await repo.createRoom(
+          title: 'Test room',
+          type: RoomType.meetup,
+          ownerName: 'Alex',
+          ownerEmoji: '🙌',
+          guestId: 'device-abc',
+        );
+        final code = room.room.code;
+
+        final reopened = LocalRoomRepository();
+        await _settle();
+
+        final back = await reopened.joinRoom(
+          code: code,
+          displayName: 'Alex',
+          emoji: '🙌',
+          guestId: 'device-abc',
+        );
+        // Demoting the organizer to a guest in their own room made the agenda
+        // permanently unmanageable, because the panel only opens for owners.
+        expect(back.viewer?.isOwner, isTrue);
+        expect(back.steps, isNotEmpty);
+      },
+    );
+
+    test(
+      'a different phone joining a restored room is still a guest',
+      () async {
+        final room = await repo.createRoom(
+          title: 'Test room',
+          type: RoomType.meetup,
+          ownerName: 'Alex',
+          ownerEmoji: '🙌',
+          guestId: 'device-abc',
+        );
+
+        final reopened = LocalRoomRepository();
+        await _settle();
+
+        final guest = await reopened.joinRoom(
+          code: room.room.code,
+          displayName: 'Sam',
+          emoji: '🔥',
+          guestId: 'device-xyz',
+        );
+        expect(guest.viewer?.isOwner, isFalse);
+      },
+    );
+
+    test('check-in is refused once the event has ended', () async {
+      final code = await endedRoom();
+      final guest = await repo.joinRoom(
+        code: code,
+        displayName: 'Sam',
+        emoji: '🔥',
+      );
+
+      expect(
+        () => repo.checkIn(code: code, memberId: guest.viewerMemberId!),
+        throwsA(
+          isA<GatherRuleException>().having(
+            (e) => e.message,
+            'message',
+            contains('event has ended'),
+          ),
+        ),
+      );
+    });
+
+    test('schema mismatch invokes onSchemaMismatch and clears storage', () async {
+      // Seed some data under the old schema.
+      final room = await makeRoom();
+      final code = room.room.code;
+
+      // Simulate a schema bump by setting the stored version ahead.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('gather.schemaVersion', 99);
+
+      // A new repository with a mismatch callback should clear storage.
+      bool? mismatchCalled;
+      final reopened = LocalRoomRepository(onSchemaMismatch: () {
+        mismatchCalled = true;
+      });
+      await _settle();
+
+      expect(mismatchCalled, isTrue);
+      expect(await reopened.getRoomState(code), throwsA(isA<GatherRuleException>()));
+
+      reopened.dispose();
+    });
   });
 }
+
+/// Persistence is fire-and-forget, so give the writes a turn to land before
+/// asserting against what a fresh repository reads back.
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 80));

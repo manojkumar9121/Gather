@@ -144,7 +144,7 @@ class RoomController extends ChangeNotifier {
       notifyListeners();
       final memberId = event.memberId ?? 0;
       Timer(const Duration(seconds: 3), () {
-        _reactions.removeWhere((r) => r.id.startsWith('$memberId-'));
+        _reactions.removeWhere((r) => r.memberId == memberId);
         notifyListeners();
       });
     }
@@ -190,30 +190,25 @@ class RoomController extends ChangeNotifier {
 
   // --- actions ------------------------------------------------------------
 
-  Future<void> addItem(String text, {bool isAnonymous = false}) =>
-      _guard(
-        () => _repository.addItem(
-          code: _requireCode(),
-          memberId: _requireMember(),
-          text: text,
-          isAnonymous: isAnonymous,
-        ),
-      );
-
-  Future<void> toggleVote(int itemId) =>
-      _guard(
-        () => _repository.toggleVote(
-          code: _requireCode(),
-          memberId: _requireMember(),
-          itemId: itemId,
-        ),
-      );
-
-  Future<void> checkIn() => _guard(
-    () => _repository.checkIn(
+  Future<void> addItem(String text, {bool isAnonymous = false}) => _guard(
+    () => _repository.addItem(
       code: _requireCode(),
       memberId: _requireMember(),
+      text: text,
+      isAnonymous: isAnonymous,
     ),
+  );
+
+  Future<void> toggleVote(int itemId) => _guard(
+    () => _repository.toggleVote(
+      code: _requireCode(),
+      memberId: _requireMember(),
+      itemId: itemId,
+    ),
+  );
+
+  Future<void> checkIn() => _guard(
+    () => _repository.checkIn(code: _requireCode(), memberId: _requireMember()),
   );
 
   Future<void> startVoting(Duration duration) => _guard(
@@ -252,6 +247,18 @@ class RoomController extends ChangeNotifier {
       code: _requireCode(),
       memberId: _requireMember(),
     ),
+  );
+
+  Future<void> completePlan() => _guard(
+    () => _repository.completePlan(
+      code: _requireCode(),
+      memberId: _requireMember(),
+    ),
+  );
+
+  Future<void> endEvent() => _guard(
+    () =>
+        _repository.endEvent(code: _requireCode(), memberId: _requireMember()),
   );
 
   Future<void> setCurrentStep(int stepId) => _guard(

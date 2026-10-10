@@ -27,7 +27,7 @@ class PeopleTab extends StatelessWidget {
           style: const TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
-            color: GatherColors.muted,
+            color: GatherColors.mutedText,
           ),
         ),
         const SizedBox(height: Gap.md),
@@ -35,11 +35,12 @@ class PeopleTab extends StatelessWidget {
           const _Note(
             'Nobody has joined yet. Share the room code to get people in.',
           ),
-        for (final member in present) _MemberRow(member: member, checkedIn: true),
+        for (final member in present)
+          _MemberRow(member: member, checkedIn: true),
         if (present.isNotEmpty && missing.isNotEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: Gap.md),
-            child: Divider(color: GatherColors.muted),
+            child: Divider(color: Color(0x1FFFFFFF)),
           ),
         for (final member in missing)
           _MemberRow(member: member, checkedIn: false),
@@ -61,9 +62,9 @@ class _MemberRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(Gap.md),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: GatherColors.muted),
+          color: const Color(0x10FFFFFF),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0x15FFFFFF)),
         ),
         child: Row(
           children: [
@@ -73,9 +74,14 @@ class _MemberRow extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: checkedIn
-                    ? GatherColors.gold.withValues(alpha: 0.25)
-                    : GatherColors.muted.withValues(alpha: 0.2),
+                    ? GatherColors.auroraGold.withValues(alpha: 0.25)
+                    : const Color(0x1FFFFFFF),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: checkedIn
+                      ? GatherColors.auroraGold.withValues(alpha: 0.5)
+                      : const Color(0x1AFFFFFF),
+                ),
               ),
               child: Text(member.emoji, style: const TextStyle(fontSize: 20)),
             ),
@@ -89,6 +95,7 @@ class _MemberRow extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
+                      color: GatherColors.whiteText,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -98,17 +105,20 @@ class _MemberRow extends StatelessWidget {
                         : checkedIn
                         ? 'Here since ${_time(member.checkedInAt)}'
                         : 'Joined, not checked in',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: GatherColors.muted,
+                      color: GatherColors.mutedText.withValues(alpha: 0.75),
                     ),
                   ),
                 ],
               ),
             ),
             if (checkedIn)
-              const Icon(Icons.check_circle_rounded,
-                  color: GatherColors.success, size: 22),
+              const Icon(
+                Icons.check_circle_rounded,
+                color: GatherColors.success,
+                size: 22,
+              ),
           ],
         ),
       ),
@@ -133,13 +143,17 @@ class _Note extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(Gap.lg),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: GatherColors.blackSurface.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: GatherColors.muted),
+        border: Border.all(color: const Color(0x1FFFFFFF)),
       ),
       child: Text(
         message,
-        style: const TextStyle(color: GatherColors.muted, height: 1.4),
+        style: TextStyle(
+          color: GatherColors.mutedText.withValues(alpha: 0.85),
+          height: 1.4,
+          fontSize: 14,
+        ),
       ),
     );
   }

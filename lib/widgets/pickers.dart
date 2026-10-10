@@ -7,8 +7,22 @@ import '../theme.dart';
 /// Emoji carries identity here instead of a photo or an account, which keeps
 /// the guest flow to two taps.
 const List<String> kEmojiChoices = [
-  '😀', '🙌', '🔥', '🎉', '😎', '🤝', '🎧', '🍿',
-  '⚡', '🌴', '🎬', '✊', '🚀', '🦄', '🍕', '🐢',
+  '😀',
+  '🙌',
+  '🔥',
+  '🎉',
+  '😎',
+  '🤝',
+  '🎧',
+  '🍿',
+  '⚡',
+  '🌴',
+  '🎬',
+  '✊',
+  '🚀',
+  '🦄',
+  '🍕',
+  '🐢',
 ];
 
 /// Shown on the landing screen and the join screen.
@@ -64,10 +78,14 @@ class _EmojiChip extends StatelessWidget {
           height: 52,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: isSelected ? GatherColors.gold : Colors.white,
+            color: isSelected
+                ? GatherColors.gold
+                : GatherColors.blackSurface.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isSelected ? GatherColors.goldDeep : GatherColors.muted,
+              color: isSelected
+                  ? GatherColors.goldDeep
+                  : const Color(0x33FFFFFF),
               width: isSelected ? 2 : 1,
             ),
           ),
@@ -98,21 +116,28 @@ class RoomTypePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (final type in RoomType.values) ...[
-          Expanded(
-            child: _TypeCard(
-              emoji: _decor[type]!.$1,
-              label: _decor[type]!.$2,
-              itemLabel: templateFor(type).itemLabel,
-              isSelected: selected == type,
-              onTap: () => onSelected(type),
+    // "Movie night" wraps to two lines where "Meetup" and "Trip" do not. Without
+    // the intrinsic height the Row would size each card to its own content and
+    // the three templates would sit at different heights. Stretching makes them
+    // all as tall as the tallest one.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final type in RoomType.values) ...[
+            Expanded(
+              child: _TypeCard(
+                emoji: _decor[type]!.$1,
+                label: _decor[type]!.$2,
+                itemLabel: templateFor(type).itemLabel,
+                isSelected: selected == type,
+                onTap: () => onSelected(type),
+              ),
             ),
-          ),
-          if (type != RoomType.values.last) const SizedBox(width: Gap.sm),
+            if (type != RoomType.values.last) const SizedBox(width: Gap.sm),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -147,7 +172,9 @@ class _TypeCard extends StatelessWidget {
             horizontal: Gap.sm,
           ),
           decoration: BoxDecoration(
-            color: isSelected ? GatherColors.auroraGold : GatherColors.blackSurface.withValues(alpha: 0.55),
+            color: isSelected
+                ? GatherColors.auroraGold
+                : GatherColors.blackSurface.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
               color: isSelected
@@ -155,16 +182,19 @@ class _TypeCard extends StatelessWidget {
                   : const Color(0x33FFFFFF),
               width: isSelected ? 2 : 1,
             ),
-            boxShadow: isSelected ? [
-              const BoxShadow(
-                color: Color(0x55FFC83D),
-                blurRadius: 16,
-                spreadRadius: 2,
-                offset: Offset(0, 4),
-              ),
-            ] : [],
+            boxShadow: isSelected
+                ? [
+                    const BoxShadow(
+                      color: Color(0x55FFC83D),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                      offset: Offset(0, 4),
+                    ),
+                  ]
+                : [],
           ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(emoji, style: const TextStyle(fontSize: 28)),
               const SizedBox(height: Gap.xs),

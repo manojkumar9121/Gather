@@ -51,13 +51,7 @@ const Map<RoomType, RoomTemplate> kRoomTemplates = {
     agendaHint: 'Where the event is right now',
     showChecklist: false,
     showExpenses: false,
-    defaultSteps: [
-      'Doors open',
-      'Welcome',
-      'Main event',
-      'Q&A',
-      'Wrap up',
-    ],
+    defaultSteps: ['Doors open', 'Welcome', 'Main event', 'Q&A', 'Wrap up'],
   ),
   RoomType.trip: RoomTemplate(
     itemLabel: 'Stop ideas',
@@ -69,13 +63,7 @@ const Map<RoomType, RoomTemplate> kRoomTemplates = {
     agendaHint: 'Where the trip is right now',
     showChecklist: true,
     showExpenses: true,
-    defaultSteps: [
-      'Meet up',
-      'Travel',
-      'Arrive',
-      'Check in',
-      'Explore',
-    ],
+    defaultSteps: ['Meet up', 'Travel', 'Arrive', 'Check in', 'Explore'],
   ),
   RoomType.movie: RoomTemplate(
     itemLabel: 'Movie picks',

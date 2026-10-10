@@ -19,6 +19,7 @@ class LocalRoomRepository implements RoomRepository {
     Random? random,
     this.minimumVotingDuration = const Duration(seconds: 5),
     this.voteOrderFreeze = const Duration(seconds: 10),
+    this.onSchemaMismatch,
   }) : _random = random ?? Random.secure() {
     unawaited(_loadRooms());
   }
@@ -106,6 +107,7 @@ class LocalRoomRepository implements RoomRepository {
     required String ownerName,
     required String ownerEmoji,
     int? expectedCount,
+    String? guestId,
   }) async {
     final cleanTitle = title.trim();
     if (cleanTitle.isEmpty) {
@@ -129,6 +131,7 @@ class LocalRoomRepository implements RoomRepository {
         currentStepId: null,
       ),
     );
+    store._onChanged = () => unawaited(_saveRooms());
     _rooms[code] = store;
 
     // Seed the agenda so "where are we?" has an answer from the first second
@@ -139,7 +142,7 @@ class LocalRoomRepository implements RoomRepository {
     }
 
     final owner = store.newMember(
-      userId: 'local-owner',
+      userId: guestId ?? 'owner:$code',
       displayName: ownerName.trim().isEmpty ? 'Organizer' : ownerName.trim(),
       emoji: ownerEmoji,
       role: MemberRole.owner,
@@ -147,10 +150,7 @@ class LocalRoomRepository implements RoomRepository {
     store.ownerMemberId = owner.id;
     unawaited(_saveRooms());
 
-    return store.snapshot(
-      viewerMemberId: owner.id,
-      freeze: voteOrderFreeze,
-    );
+    return store.snapshot(viewerMemberId: owner.id, freeze: voteOrderFreeze);
   }
 
   @override
@@ -198,10 +198,7 @@ class LocalRoomRepository implements RoomRepository {
     store.emit(RoomEvent.memberJoined(member.id));
     unawaited(_saveRooms());
 
-    return store.snapshot(
-      viewerMemberId: member.id,
-      freeze: voteOrderFreeze,
-    );
+    return store.snapshot(viewerMemberId: member.id, freeze: voteOrderFreeze);
   }
 
   @override
@@ -223,9 +220,11 @@ class LocalRoomRepository implements RoomRepository {
         "That's too long to read on a phone. Keep it under 280 characters.",
       );
     }
-    if (store.room.isClosed) {
-      throw const GatherRuleException(
-        'This room is closed, so nothing new can be added.',
+    if (store.room.isFinished) {
+      throw GatherRuleException(
+        store.room.eventEnded
+            ? 'This event has ended, so nothing new can be added.'
+            : 'This room is closed, so nothing new can be added.',
       );
     }
     if (store.items.length >= 100) {
@@ -257,6 +256,12 @@ class LocalRoomRepository implements RoomRepository {
     // rejected. This is what stops a missed or restarted scheduled close from
     // leaving a room open forever.
     _lazyCloseIfPastDeadline(store);
+
+    if (store.room.eventEnded) {
+      throw const GatherRuleException(
+        'This event has ended, so voting is closed.',
+      );
+    }
 
     if (store.room.status != RoomStatus.voting) {
       throw GatherRuleException(
@@ -291,6 +296,13 @@ class LocalRoomRepository implements RoomRepository {
   Future<void> checkIn({required String code, required int memberId}) async {
     final store = _store(code);
     final member = _requireMember(store, memberId);
+    if (store.room.isFinished) {
+      throw GatherRuleException(
+        store.room.eventEnded
+            ? 'This event has ended, so the count is closed.'
+            : 'This room is closed, so the count is closed.',
+      );
+    }
     if (member.isCheckedIn) {
       throw const GatherRuleException("You're already checked in.");
     }
@@ -315,6 +327,11 @@ class LocalRoomRepository implements RoomRepository {
     final store = _store(code);
     _requireOwner(store, memberId);
 
+    if (store.room.eventEnded) {
+      throw const GatherRuleException(
+        'This event has ended, so a vote cannot be started.',
+      );
+    }
     if (store.room.status == RoomStatus.voting) {
       throw const GatherRuleException('Voting is already running.');
     }
@@ -370,8 +387,7 @@ class LocalRoomRepository implements RoomRepository {
 
     if (store.items.isNotEmpty) {
       final counts = {
-        for (final item in store.items.values)
-          item.id: item.voteCount,
+        for (final item in store.items.values) item.id: item.voteCount,
       };
       final top = counts.values.reduce(max);
       if (top > 0) {
@@ -443,7 +459,9 @@ class LocalRoomRepository implements RoomRepository {
     if (wasCurrent) {
       // Stepping back is only allowed as a consequence of deleting the
       // pointer itself, never as a way to rewind the room.
-      final replacement = store.steps.isEmpty ? null : store.steps.values.first.id;
+      final replacement = store.steps.isEmpty
+          ? null
+          : store.steps.values.first.id;
       store.room = store.room.withCurrentStep(replacement);
       if (replacement != null) {
         store.emit(RoomEvent.stepChanged(replacement));
@@ -482,9 +500,17 @@ class LocalRoomRepository implements RoomRepository {
   }
 
   @override
-  Future<void> advanceStep({required String code, required int memberId}) async {
+  Future<void> advanceStep({
+    required String code,
+    required int memberId,
+  }) async {
     final store = _store(code);
     _requireOwner(store, memberId);
+
+    // Already completed — nothing to advance.
+    if (store.room.agendaCompleted) {
+      throw const GatherRuleException('The plan is already complete.');
+    }
 
     final currentId = store.room.currentStepId;
     final current = currentId == null ? null : store.steps[currentId];
@@ -502,12 +528,61 @@ class LocalRoomRepository implements RoomRepository {
       // The pointer stays on the final step rather than moving past the end.
       // There is no beyond-the-end state to design around or to render badly.
       throw const GatherRuleException(
-        "This is the last step. You're at the end of the plan.",
+        "This is the last step. Use 'Complete plan' to finish.",
       );
     }
 
     store.room = store.room.copyWith(currentStepId: next.id);
     store.emit(RoomEvent.stepChanged(next.id));
+  }
+
+  @override
+  Future<void> completePlan({
+    required String code,
+    required int memberId,
+  }) async {
+    final store = _store(code);
+    _requireOwner(store, memberId);
+
+    // Idempotent.
+    if (store.room.agendaCompleted) return;
+
+    // Must be on the final step before completing.
+    if (!store.isAtEndOfPlan) {
+      throw const GatherRuleException(
+        'Finish every step first. You can only complete the plan at the last step.',
+      );
+    }
+
+    store.room = store.room.copyWith(agendaCompleted: true);
+    store.emit(const RoomEvent(RoomEventType.stepChanged, stepId: -1));
+  }
+
+  @override
+  Future<void> endEvent({required String code, required int memberId}) async {
+    final store = _store(code);
+    _requireOwner(store, memberId);
+
+    // Idempotent.
+    if (store.room.eventEnded) return;
+
+    // The whole point of ending the event is that the agenda ran its course.
+    if (!store.room.agendaCompleted) {
+      throw const GatherRuleException(
+        'Finish the plan first, then you can end the event.',
+      );
+    }
+
+    // An open vote would otherwise keep running its timer and could resolve a
+    // winner into a room nobody is watching any more.
+    if (store.room.isVoting) {
+      throw const GatherRuleException(
+        'A vote is still open. Close it before ending the event.',
+      );
+    }
+
+    store.room = store.room.copyWith(eventEnded: true);
+    store.emit(const RoomEvent(RoomEventType.stepChanged, stepId: -1));
   }
 
   @override
@@ -566,9 +641,30 @@ class LocalRoomRepository implements RoomRepository {
 
   // --- persistence ---------------------------------------------------------
 
+  /// Schema version for SharedPreferences persistence. Bump this when the stored
+  /// shape changes; old data is cleared on mismatch so a stale room never gets
+  /// silently deserialized into the wrong model.
+  ///
+  /// When bumped, [onSchemaMismatch] (if provided) is invoked before clearing
+  /// persisted rooms, giving the app a chance to surface a warning to the user.
+  static const _schemaVersion = 2;
+
+  final void Function()? onSchemaMismatch;
+
   Future<void> _loadRooms() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Read schema version separately from the rooms payload.
+      final storedVersion = prefs.getInt('gather.schemaVersion');
+      if (storedVersion != null && storedVersion != _schemaVersion) {
+        // Schema changed since the last write — clear old data rather than risk
+        // corrupt rooms slipping through partial deserialization. Notify the
+        // caller so a warning can be surfaced to the user.
+        onSchemaMismatch?.call();
+        prefs.remove('gather.rooms');
+        await prefs.setInt('gather.schemaVersion', _schemaVersion);
+        return;
+      }
       final data = prefs.getString('gather.rooms');
       if (data != null && data.isNotEmpty) {
         final list = jsonDecode(data) as List<dynamic>;
@@ -576,11 +672,7 @@ class LocalRoomRepository implements RoomRepository {
           final map = item as Map<String, dynamic>;
           final code = map['code'] as String;
           if (_rooms.containsKey(code)) continue;
-          // Basic restore: create a placeholder store for persistence demo
-          // In production this would fully deserialize, but for local mode
-          // we ensure the room code survives across restarts.
-          final title = map['title'] ?? 'Restored room';
-          final typeName = map['type'] ?? 'meetup';
+          final typeName = map['type'] as String? ?? 'meetup';
           final type = RoomType.values.firstWhere(
             (t) => t.wireName == typeName,
             orElse: () => RoomType.meetup,
@@ -588,23 +680,89 @@ class LocalRoomRepository implements RoomRepository {
           final store = _RoomStore(
             Room(
               code: code,
-              title: title,
+              title: map['title'] as String? ?? 'Restored room',
               type: type,
-              ownerId: 'local-owner',
-              status: RoomStatus.open,
-              createdAt: DateTime.parse(map['createdAt'] ?? DateTime.now().toIso8601String()),
+              ownerId: map['ownerId'] as String? ?? 'local-owner',
+              status: RoomStatus.values.firstWhere(
+                (s) => s.wireName == map['status'],
+                orElse: () => RoomStatus.open,
+              ),
+              createdAt:
+                  DateTime.tryParse(map['createdAt'] as String? ?? '') ??
+                  DateTime.now(),
               expectedCount: map['expectedCount'] as int?,
               winnerItemId: map['winnerItemId'] as int?,
               wasTie: (map['wasTie'] ?? false) as bool,
-              currentStepId: map['currentStepId'] as int?,
+              // A pointer to a step that was never restored would strand the
+              // plan, so only keep it when the step actually came back.
+              currentStepId: _restoredStepId(map),
+              agendaCompleted: (map['agendaCompleted'] ?? false) as bool,
+              eventEnded: (map['eventEnded'] ?? false) as bool,
             ),
           );
+          _restoreSteps(store, map['steps']);
+          _restoreMembers(store, map['members'], map['ownerMemberId'] as int?);
+          store._onChanged = () => unawaited(_saveRooms());
           _rooms[code] = store;
         }
       }
     } catch (_) {
       // Persistence best-effort for local mode.
     }
+  }
+
+  static int? _restoredStepId(Map<String, dynamic> map) {
+    final steps = map['steps'];
+    if (steps is! List || steps.isEmpty) return null;
+    final wanted = map['currentStepId'] as int?;
+    if (wanted == null) return null;
+    for (final raw in steps) {
+      final step = raw as Map<String, dynamic>;
+      if (step['id'] == wanted) return wanted;
+    }
+    return null;
+  }
+
+  static void _restoreSteps(_RoomStore store, Object? raw) {
+    if (raw is! List) return;
+    for (final entry in raw) {
+      final map = entry as Map<String, dynamic>;
+      final step = AgendaStep(
+        id: map['id'] as int,
+        title: map['title'] as String,
+        position: map['position'] as int,
+        at: DateTime.tryParse(map['at'] as String? ?? ''),
+      );
+      store.steps[step.id] = step;
+      if (step.id >= store._nextStepId) store._nextStepId = step.id + 1;
+    }
+  }
+
+  static void _restoreMembers(
+    _RoomStore store,
+    Object? raw,
+    int? ownerMemberId,
+  ) {
+    if (raw is! List) return;
+    for (final entry in raw) {
+      final map = entry as Map<String, dynamic>;
+      final member = Member(
+        id: map['id'] as int,
+        userId: map['userId'] as String,
+        displayName: map['displayName'] as String,
+        emoji: map['emoji'] as String,
+        role: map['role'] == 'owner' ? MemberRole.owner : MemberRole.guest,
+        joinedAt:
+            DateTime.tryParse(map['joinedAt'] as String? ?? '') ??
+            DateTime.now(),
+        checkedInAt: DateTime.tryParse(map['checkedInAt'] as String? ?? ''),
+      );
+      store.members[member.id] = member;
+      if (member.id >= store._nextMemberId) {
+        store._nextMemberId = member.id + 1;
+      }
+    }
+    store.ownerMemberId = ownerMemberId;
   }
 
   Future<void> _saveRooms() async {
@@ -621,9 +779,39 @@ class LocalRoomRepository implements RoomRepository {
           'expectedCount': s.room.expectedCount,
           'currentStepId': s.room.currentStepId,
           'status': s.room.status.wireName,
+          'ownerId': s.room.ownerId,
+          'winnerItemId': s.room.winnerItemId,
+          'wasTie': s.room.wasTie,
+          'agendaCompleted': s.room.agendaCompleted,
+          'eventEnded': s.room.eventEnded,
+          'ownerMemberId': s.ownerMemberId,
+          'steps': [
+            for (final step in s.steps.values)
+              {
+                'id': step.id,
+                'title': step.title,
+                'position': step.position,
+                'at': step.at?.toIso8601String(),
+              },
+          ],
+          'members': [
+            for (final m in s.members.values)
+              {
+                'id': m.id,
+                'userId': m.userId,
+                'displayName': m.displayName,
+                'emoji': m.emoji,
+                'role': m.role.wireName,
+                'joinedAt': m.joinedAt.toIso8601String(),
+                'checkedInAt': m.checkedInAt?.toIso8601String(),
+              },
+          ],
         });
       }
       await prefs.setString('gather.rooms', jsonEncode(list));
+      // Persist the schema version alongside the data so a future read can
+      // detect structural changes before deserializing stale rooms.
+      await prefs.setInt('gather.schemaVersion', _schemaVersion);
     } catch (_) {
       // Persistence best-effort for local mode.
     }
@@ -657,6 +845,18 @@ class _RoomStore {
 
   int get checkedInCount => members.values.where((m) => m.isCheckedIn).length;
 
+  bool get isAtEndOfPlan =>
+      room.currentStepId != null && _nextStepAfter(room.currentStepId!) == null;
+
+  AgendaStep? _nextStepAfter(int currentId) {
+    final current = steps[currentId];
+    if (current == null) return null;
+    for (final step in steps.values) {
+      if (step.position == current.position + 1) return step;
+    }
+    return null;
+  }
+
   Member? memberByUserId(String userId) {
     for (final member in members.values) {
       if (member.userId == userId) return member;
@@ -667,7 +867,15 @@ class _RoomStore {
   void emit(RoomEvent event) {
     if (events.isClosed) return;
     events.add(event);
+    // Every mutation broadcasts, so this is the one place that has to remember
+    // to persist. Doing it per-caller meant edits made after the room was
+    // created were silently dropped on restart.
+    _onChanged?.call();
   }
+
+  /// Set by the repository so [emit] can persist. Null in tests that build a
+  /// store directly.
+  void Function()? _onChanged;
 
   Member newMember({
     required String userId,
@@ -789,7 +997,8 @@ class _RoomStore {
           ItemView(
             item: item,
             votes: item.voteCount,
-            votedByMe: viewerMemberId != null &&
+            votedByMe:
+                viewerMemberId != null &&
                 votes.containsKey('${item.id}:$viewerMemberId'),
             canSeeAuthor: canSeeAuthors,
           ),

@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// What the phone remembers between launches.
@@ -45,11 +46,16 @@ class GuestIdentity {
 /// The `guestId` is generated once per install and is the token the server
 /// hands back a member for. Losing it means a returning phone looks like a new
 /// person, which is exactly what the check-in counter must not do.
-class GuestIdentityStore {
+class GuestIdentityStore extends ChangeNotifier {
   static const _kGuestId = 'gather.guestId';
   static const _kName = 'gather.displayName';
   static const _kEmoji = 'gather.emoji';
   static const _kLastRoom = 'gather.lastRoomCode';
+
+  GuestIdentity? _current;
+
+  /// The identity as last loaded or saved. Null until [load] has answered.
+  GuestIdentity? get current => _current;
 
   /// RFC 4122 version 4 shape, generated without a package.
   static String _uuid(Random random) {
@@ -69,27 +75,45 @@ class GuestIdentityStore {
       guestId = _uuid(Random.secure());
       await prefs.setString(_kGuestId, guestId);
     }
-    return GuestIdentity(
+    final identity = GuestIdentity(
       guestId: guestId,
       displayName: prefs.getString(_kName),
       emoji: prefs.getString(_kEmoji),
       lastRoomCode: prefs.getString(_kLastRoom),
     );
+    _current = identity;
+    return identity;
   }
 
   Future<void> saveName(String name, String emoji) async {
+    // The in-memory copy moves first. The UI should not wait on a disk write to
+    // show what the user just did.
+    _update((current) => current.copyWith(displayName: name, emoji: emoji));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kName, name);
     await prefs.setString(_kEmoji, emoji);
   }
 
   Future<void> saveLastRoom(String code) async {
+    _update((current) => current.copyWith(lastRoomCode: code));
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kLastRoom, code);
   }
 
   Future<void> clearLastRoom() async {
+    _update((current) => current.copyWith(clearRoom: true));
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kLastRoom);
+  }
+
+  /// Keeps the in-memory copy in step with what was just written, so anything
+  /// listening sees the new value without waiting for a restart. Without this
+  /// the landing screen keeps showing a stale "back into your room" for the
+  /// whole session, because the app only reads the identity once at startup.
+  void _update(GuestIdentity Function(GuestIdentity current) change) {
+    final current = _current;
+    if (current == null) return;
+    _current = change(current);
+    notifyListeners();
   }
 }

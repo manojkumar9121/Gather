@@ -1,6 +1,10 @@
+// TODO: Phase 0 — NOT YET IMPLEMENTED
+// This endpoint is scaffolding only. Deploying it will produce empty rooms with
+// no members, items, or events because none of the business logic is wired to
+// the database. See docs/ARCHITECTURE.md for the intended server implementation.
 import 'package:serverpod/serverpod.dart';
 
-/// Gather endpoint: room lifecycle, streaming, and rules.
+/// Gather endpoint: room lifecycle, streaming, and rules (scaffolding).
 ///
 /// Implements the server-side behavior from the build plan:
 /// - Room creation, join, snapshot, and events stream

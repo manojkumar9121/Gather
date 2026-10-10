@@ -8,7 +8,7 @@ This guide explains how to deploy Gather for yourself. The app runs fully locall
 - `server/` — Serverpod backend code. Not deployed; deploy it yourself using the steps below.
 - `protocol/` — `.spy.yaml` models for Room, Member, Item, Vote, AgendaStep.
 - `migrations/` — SQL migration for the room database.
-- `endpoint/` — `GatherEndpoint` implementing the full server-side rule set.
+- `endpoint/` — **Scaffolding only**: `GatherEndpoint` is a stub with no database wiring. Do not deploy until the implementation is complete (see TODO banner in the file).
 
 ## Serverpod features used (for stack score)
 

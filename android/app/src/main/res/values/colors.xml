@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Aurora Glass base, matching GatherColors.blackBase in the Flutter app
+         so the launch window does not flash a different colour. -->
+    <color name="aurora_base">#06051A</color>
+</resources>

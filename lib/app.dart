@@ -20,7 +20,24 @@ class GatherApp extends StatefulWidget {
 class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
   // One repository for the app's lifetime. Swapping this for a Serverpod-backed
   // implementation is the only change the backend requires.
-  final RoomRepository _repository = LocalRoomRepository();
+  final RoomRepository _repository = LocalRoomRepository(
+    onSchemaMismatch: () {
+      // A schema bump means stored rooms will be cleared. Show a brief banner
+      // so the user isn't surprised by lost state. This is best-effort; if the
+      // navigator isn't ready yet the callback simply does nothing.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final state = context.currentState;
+        state?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Your local room data was cleared due to an app update. '
+              'Create a new room to continue.',
+            ),
+          ),
+        );
+      });
+    },
+  );
 
   final GuestIdentityStore _identityStore = GuestIdentityStore();
   final GatherDeepLinks _deepLinks = GatherDeepLinks();
@@ -33,7 +50,15 @@ class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Saving a name or a room has to reach the landing screen, otherwise
+    // "back into your room" only appears after a restart.
+    _identityStore.addListener(_onIdentityChanged);
     _bootstrap();
+  }
+
+  void _onIdentityChanged() {
+    if (!mounted) return;
+    setState(() => _identity = _identityStore.current);
   }
 
   Future<void> _bootstrap() async {
@@ -70,9 +95,14 @@ class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _identityStore.removeListener(_onIdentityChanged);
     _linkSub?.cancel();
     _deepLinks.dispose();
-    (_repository as LocalRoomRepository).dispose();
+    // Only the local implementation owns timers and subscriptions. Checked rather
+    // than cast so swapping in a Serverpod repository -- the change this file
+    // exists to make easy -- does not throw on teardown.
+    final repo = _repository;
+    if (repo is LocalRoomRepository) repo.dispose();
     super.dispose();
   }
 
@@ -88,7 +118,7 @@ class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
           debugShowCheckedModeBanner: false,
           theme: buildGatherTheme(),
           navigatorKey: _navigatorKey,
-          home: LandingScreen(identity: _identity),
+          home: const LandingScreen(),
         ),
       ),
     );
@@ -108,8 +138,7 @@ class RepositoryScope extends InheritedWidget {
   final RoomRepository repository;
 
   static RoomRepository of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<RepositoryScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<RepositoryScope>();
     assert(scope != null, 'No repository found in the widget tree.');
     return scope!.repository;
   }

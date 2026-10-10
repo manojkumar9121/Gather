@@ -70,6 +70,8 @@ class Room {
     required this.wasTie,
     this.votingEndsAt,
     this.currentStepId,
+    this.agendaCompleted = false,
+    this.eventEnded = false,
   });
 
   final String code;
@@ -94,8 +96,23 @@ class Room {
   /// steps after it are upcoming. Null means the room has not started moving.
   final int? currentStepId;
 
+  /// Whether the organizer has explicitly completed the plan. This is a
+  /// separate flag from the pointer because completion is an intentional
+  /// action, not just reaching the last step — the UI needs to know whether
+  /// to show a "complete" state rather than the final active step.
+  final bool agendaCompleted;
+
+  /// Whether the organizer has ended the event outright. This is strictly
+  /// after [agendaCompleted]: finishing the plan says the agenda ran to the
+  /// end, ending the event says the room is done and no longer live.
+  final bool eventEnded;
+
   bool get isVoting => status == RoomStatus.voting;
   bool get isClosed => status == RoomStatus.closed;
+
+  /// A room that has ended takes no more votes, items, or step changes. Kept as
+  /// a derived getter so callers cannot check one flag and miss the other.
+  bool get isFinished => eventEnded || isClosed;
 
   Room copyWith({
     RoomStatus? status,
@@ -104,6 +121,8 @@ class Room {
     bool? wasTie,
     int? currentStepId,
     int? expectedCount,
+    bool? agendaCompleted,
+    bool? eventEnded,
   }) {
     return Room(
       code: code,
@@ -117,6 +136,8 @@ class Room {
       winnerItemId: winnerItemId ?? this.winnerItemId,
       wasTie: wasTie ?? this.wasTie,
       currentStepId: currentStepId ?? this.currentStepId,
+      agendaCompleted: agendaCompleted ?? this.agendaCompleted,
+      eventEnded: eventEnded ?? this.eventEnded,
     );
   }
 
@@ -135,6 +156,8 @@ class Room {
       winnerItemId: winnerItemId,
       wasTie: wasTie,
       currentStepId: stepId,
+      agendaCompleted: agendaCompleted,
+      eventEnded: eventEnded,
     );
   }
 }

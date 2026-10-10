@@ -52,9 +52,8 @@ class _QrScannerSheetState extends State<QrScannerSheet> {
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
-            errorBuilder: (context, error) => _ScannerError(
-              error: error.errorDetails?.message,
-            ),
+            errorBuilder: (context, error) =>
+                _ScannerError(error: error.errorDetails?.message),
           ),
           const _ScannerOverlay(),
           SafeArea(

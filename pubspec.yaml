@@ -1,5 +1,5 @@
 name: gather
-description: "A new Flutter project."
+description: "Live group rooms for any get-together. Create a room, share a code or QR, and let everyone post ideas, upvote, check in, and watch a timed vote close with a winner."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -64,7 +64,6 @@ flutter:
 
   assets:
     - gather-logo-1024.png
-    - assets/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

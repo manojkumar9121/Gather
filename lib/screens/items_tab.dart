@@ -7,11 +7,7 @@ import '../state/room_controller.dart';
 import '../theme.dart';
 
 class ItemsTab extends StatefulWidget {
-  const ItemsTab({
-    super.key,
-    required this.controller,
-    required this.snapshot,
-  });
+  const ItemsTab({super.key, required this.controller, required this.snapshot});
 
   final RoomController controller;
   final RoomSnapshot snapshot;
@@ -34,9 +30,12 @@ class _ItemsTabState extends State<ItemsTab> {
   Future<void> _submit() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
+    // Cleared only once the post is accepted. Clearing first meant a rejected
+    // suggestion vanished with no way to recover the typing.
+    await widget.controller.addItem(text);
+    if (!mounted || widget.controller.error != null) return;
     _controller.clear();
     _focus.requestFocus();
-    await widget.controller.addItem(text);
   }
 
   @override
@@ -58,6 +57,10 @@ class _ItemsTabState extends State<ItemsTab> {
                 _ResultCard(snapshot: snapshot),
                 const SizedBox(height: Gap.lg),
               ],
+              if (room.isFinished) ...[
+                _EndedNotice(),
+                const SizedBox(height: Gap.lg),
+              ],
               if (items.isEmpty)
                 _EmptyItems(template: template, room: room)
               else
@@ -72,7 +75,10 @@ class _ItemsTabState extends State<ItemsTab> {
             ],
           ),
         ),
-        if (!room.isClosed)
+        // Keyed on the same flag the repository refuses posts with. Keying on
+        // isClosed alone left a fully interactive composer on an ended room
+        // where every submission failed.
+        if (!room.isFinished)
           _Composer(
             controller: _controller,
             focus: _focus,
@@ -101,18 +107,19 @@ class _ResultCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(Gap.lg),
         decoration: BoxDecoration(
-          color: kStageBackground,
+          color: GatherColors.blackSurface.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: const Color(0x1FFFFFFF)),
         ),
         child: const Row(
           children: [
-            Icon(Icons.circle, size: 10, color: GatherColors.muted),
+            Icon(Icons.circle, size: 10, color: GatherColors.mutedText),
             SizedBox(width: Gap.md),
             Expanded(
               child: Text(
                 'Nobody voted this time. Start another?',
                 style: TextStyle(
-                  color: GatherColors.offWhite,
+                  color: Color(0xCCF4F2FF),
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),
@@ -132,7 +139,7 @@ class _ResultCard extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             GatherColors.auroraGold.withValues(alpha: 0.22),
-            GatherColors.auroraGold.withValues(alpha: 0.06),
+            GatherColors.blackSurface.withValues(alpha: 0.65),
           ],
         ),
         borderRadius: BorderRadius.circular(26),
@@ -142,10 +149,10 @@ class _ResultCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: GatherColors.auroraGold.withValues(alpha: 0.45),
+            color: GatherColors.auroraGold.withValues(alpha: 0.35),
             blurRadius: 20,
-            spreadRadius: -10,
-            offset: const Offset(0, 8),
+            spreadRadius: -8,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -157,7 +164,7 @@ class _ResultCard extends StatelessWidget {
               const Text(
                 'WINNER',
                 style: TextStyle(
-                  color: GatherColors.gold,
+                  color: GatherColors.auroraGold,
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.2,
@@ -171,13 +178,13 @@ class _ResultCard extends StatelessWidget {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: GatherColors.gold.withValues(alpha: 0.2),
+                    color: GatherColors.auroraGold.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     'TIE, BROKEN AT RANDOM',
                     style: TextStyle(
-                      color: GatherColors.gold,
+                      color: GatherColors.auroraGold,
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
                     ),
@@ -190,7 +197,7 @@ class _ResultCard extends StatelessWidget {
           Text(
             winner.item.text,
             style: const TextStyle(
-              color: Colors.white,
+              color: GatherColors.whiteText,
               fontSize: 24,
               fontWeight: FontWeight.w800,
               height: 1.25,
@@ -199,7 +206,10 @@ class _ResultCard extends StatelessWidget {
           const SizedBox(height: Gap.xs),
           Text(
             winner.votes == 1 ? '1 vote' : '${winner.votes} votes',
-            style: const TextStyle(color: GatherColors.muted, fontSize: 15),
+            style: TextStyle(
+              color: GatherColors.mutedText.withValues(alpha: 0.85),
+              fontSize: 15,
+            ),
           ),
         ],
       ),
@@ -208,11 +218,7 @@ class _ResultCard extends StatelessWidget {
 }
 
 class _ItemRow extends StatelessWidget {
-  const _ItemRow({
-    required this.view,
-    required this.snapshot,
-    this.onVote,
-  });
+  const _ItemRow({required this.view, required this.snapshot, this.onVote});
 
   final ItemView view;
   final RoomSnapshot snapshot;
@@ -235,11 +241,13 @@ class _ItemRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(Gap.md, Gap.sm, Gap.sm, Gap.sm),
         decoration: BoxDecoration(
           color: view.votedByMe
-              ? GatherColors.auroraGold.withValues(alpha: 0.16)
-              : GatherColors.blackSurface.withValues(alpha: 0.45),
+              ? GatherColors.auroraGold.withValues(alpha: 0.12)
+              : const Color(0x10FFFFFF),
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: view.votedByMe ? GatherColors.auroraGold : const Color(0x33FFFFFF),
+            color: view.votedByMe
+                ? GatherColors.auroraGold.withValues(alpha: 0.35)
+                : const Color(0x18FFFFFF),
             width: view.votedByMe ? 2 : 1,
           ),
         ),
@@ -264,9 +272,9 @@ class _ItemRow extends StatelessWidget {
                     const SizedBox(height: Gap.xs),
                     Text(
                       byline,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: GatherColors.mutedText,
+                        color: GatherColors.mutedText.withValues(alpha: 0.75),
                       ),
                     ),
                   ],
@@ -303,14 +311,21 @@ class _VoteButton extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          constraints: const BoxConstraints(minWidth: 64, minHeight: kTapTarget),
+          constraints: const BoxConstraints(
+            minWidth: 64,
+            minHeight: kTapTarget,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: Gap.sm),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: isVoted ? GatherColors.ultramarine : Colors.transparent,
+            color: isVoted
+                ? GatherColors.auroraGold.withValues(alpha: 0.25)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isVoted ? GatherColors.ultramarine : GatherColors.muted,
+              color: isVoted
+                  ? GatherColors.auroraGold.withValues(alpha: 0.5)
+                  : const Color(0x3FFFFFFF),
               width: 2,
             ),
           ),
@@ -321,7 +336,9 @@ class _VoteButton extends StatelessWidget {
                 isVoted
                     ? Icons.favorite_rounded
                     : Icons.favorite_border_rounded,
-                color: isVoted ? GatherColors.gold : GatherColors.ultramarine,
+                color: isVoted
+                    ? GatherColors.auroraGold
+                    : const Color(0xAAF4F2FF),
                 size: 20,
               ),
               const SizedBox(height: 2),
@@ -330,7 +347,9 @@ class _VoteButton extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: isVoted ? Colors.white : GatherColors.ultramarine,
+                  color: isVoted
+                      ? GatherColors.auroraGold
+                      : const Color(0xAAF4F2FF),
                 ),
               ),
             ],
@@ -364,8 +383,8 @@ class _Composer extends StatelessWidget {
         Gap.md + MediaQuery.of(context).padding.bottom,
       ),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: GatherColors.muted)),
+        color: Color(0x1506051A),
+        border: Border(top: BorderSide(color: Color(0x1FFFFFFF))),
       ),
       child: Row(
         children: [
@@ -376,12 +395,26 @@ class _Composer extends StatelessWidget {
               textCapitalization: TextCapitalization.sentences,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => onSubmit(),
+              style: const TextStyle(color: GatherColors.whiteText),
               decoration: InputDecoration(
                 hintText: '${template.itemVerb} something…',
+                hintStyle: TextStyle(
+                  color: GatherColors.mutedText.withValues(alpha: 0.6),
+                ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: Gap.md,
                   vertical: 14,
+                ),
+                filled: true,
+                fillColor: const Color(0x18FFFFFF),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: const Color(0x1FFFFFFF)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: const Color(0x1FFFFFFF)),
                 ),
               ),
             ),
@@ -392,6 +425,8 @@ class _Composer extends StatelessWidget {
             height: kTapTarget,
             child: FilledButton(
               style: FilledButton.styleFrom(
+                backgroundColor: GatherColors.auroraGold,
+                foregroundColor: const Color(0xFF221900),
                 padding: EdgeInsets.zero,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -399,6 +434,40 @@ class _Composer extends StatelessWidget {
               ),
               onPressed: onSubmit,
               child: const Icon(Icons.arrow_upward_rounded),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EndedNotice extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(Gap.lg),
+      decoration: BoxDecoration(
+        color: const Color(0x18FFFFFF),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0x1FFFFFFF)),
+      ),
+      child: const Row(
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            color: GatherColors.success,
+            size: 20,
+          ),
+          SizedBox(width: Gap.md),
+          Expanded(
+            child: Text(
+              'This event has ended. The room is read-only.',
+              style: TextStyle(
+                color: GatherColors.whiteText,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -419,9 +488,9 @@ class _EmptyItems extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(Gap.xl),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: GatherColors.muted),
+        color: GatherColors.blackSurface.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0x1FFFFFFF)),
       ),
       child: Column(
         children: [
@@ -434,7 +503,11 @@ class _EmptyItems extends StatelessWidget {
                 : 'No ${template.itemLabel.toLowerCase()} yet. Be the first to '
                       'add one below.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: GatherColors.muted, height: 1.4),
+            style: TextStyle(
+              color: GatherColors.mutedText.withValues(alpha: 0.85),
+              height: 1.4,
+              fontSize: 14,
+            ),
           ),
         ],
       ),

@@ -97,9 +97,23 @@ class RoomSnapshot {
   /// an answer, and the advance control disables itself.
   bool get isAtEndOfPlan => currentStep != null && nextStep == null;
 
+  /// Whether the organizer has explicitly marked the plan complete. This is
+  /// distinct from reaching the final step: the plan can sit at its last step
+  /// indefinitely until the organizer hits "Complete plan".
+  bool get isPlanCompleted => room.agendaCompleted;
+
+  /// Whether the organizer has ended the event. Once this is true the room is
+  /// archived: it still renders, but nothing can be added to it.
+  bool get isEventEnded => room.eventEnded;
+
   /// Where a step sits relative to the room's current pointer. Derived, never
   /// stored.
   AgendaStepState stateFor(AgendaStep step) {
+    // A completed plan has no step in progress. Without this the final step
+    // would keep rendering as "current" forever, which reads as work still
+    // pending after the organizer already called it done.
+    if (room.agendaCompleted) return AgendaStepState.done;
+
     final currentId = room.currentStepId;
     if (currentId == null) {
       return step.position == 0
@@ -140,6 +154,5 @@ class RoomSnapshot {
 
   /// Whether a vote happened at all, which decides between a real reveal and
   /// the designed empty state.
-  bool get hasAnyVotes =>
-      items.any((i) => i.item.voteCount > 0);
+  bool get hasAnyVotes => items.any((i) => i.item.voteCount > 0);
 }
