@@ -605,7 +605,7 @@ class LocalRoomRepository implements RoomRepository {
     if (store.room.status == RoomStatus.voting &&
         endsAt != null &&
         DateTime.now().isAfter(endsAt)) {
-      unawaited(closeVoting(code: store.room.code));
+      unawaited(closeVoting(code: store.room.code).catchError((_) {}));
     }
   }
 

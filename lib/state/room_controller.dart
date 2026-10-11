@@ -50,6 +50,7 @@ class RoomController extends ChangeNotifier {
 
   StreamSubscription<RoomEvent>? _eventSub;
   Timer? _ticker;
+  final List<Timer> _reactionTimers = [];
 
   /// The countdown is anchored to the server, not to this device's clock.
   ///
@@ -143,10 +144,12 @@ class RoomController extends ChangeNotifier {
       if (_reactions.length > 12) _reactions.removeAt(0);
       notifyListeners();
       final memberId = event.memberId ?? 0;
-      Timer(const Duration(seconds: 3), () {
-        _reactions.removeWhere((r) => r.memberId == memberId);
-        notifyListeners();
-      });
+      _reactionTimers.add(
+        Timer(const Duration(seconds: 3), () {
+          _reactions.removeWhere((r) => r.memberId == memberId);
+          notifyListeners();
+        }),
+      );
     }
     if (event.type == RoomEventType.votingStarted) {
       _reanchor(event.remainingMs);
@@ -320,6 +323,7 @@ class RoomController extends ChangeNotifier {
   void dispose() {
     _eventSub?.cancel();
     _ticker?.cancel();
+    for (final timer in _reactionTimers) timer.cancel();
     super.dispose();
   }
 }

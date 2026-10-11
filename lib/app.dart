@@ -20,31 +20,15 @@ class GatherApp extends StatefulWidget {
 class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
   // One repository for the app's lifetime. Swapping this for a Serverpod-backed
   // implementation is the only change the backend requires.
-  final RoomRepository _repository = LocalRoomRepository(
-    onSchemaMismatch: () {
-      // A schema bump means stored rooms will be cleared. Show a brief banner
-      // so the user isn't surprised by lost state. This is best-effort; if the
-      // navigator isn't ready yet the callback simply does nothing.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final state = context.currentState;
-        state?.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Your local room data was cleared due to an app update. '
-              'Create a new room to continue.',
-            ),
-          ),
-        );
-      });
-    },
-  );
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  late final RoomRepository _repository;
 
   final GuestIdentityStore _identityStore = GuestIdentityStore();
   final GatherDeepLinks _deepLinks = GatherDeepLinks();
 
   GuestIdentity? _identity;
   StreamSubscription<String>? _linkSub;
-  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -53,6 +37,25 @@ class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
     // Saving a name or a room has to reach the landing screen, otherwise
     // "back into your room" only appears after a restart.
     _identityStore.addListener(_onIdentityChanged);
+    _repository = LocalRoomRepository(
+      onSchemaMismatch: () {
+        // A schema bump means stored rooms will be cleared. Show a brief banner
+        // so the user isn't surprised by lost state. This is best-effort; if the
+        // navigator isn't ready yet the callback simply does nothing.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final navigator = _navigatorKey.currentState;
+          if (navigator == null) return;
+          ScaffoldMessenger.of(navigator.context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Your local room data was cleared due to an app update. '
+                'Create a new room to continue.',
+              ),
+            ),
+          );
+        });
+      },
+    );
     _bootstrap();
   }
 

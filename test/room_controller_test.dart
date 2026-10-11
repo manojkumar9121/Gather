@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gather/data/room_repository.dart';
+import 'package:gather/domain/models.dart';
 import 'package:gather/domain/room_event.dart';
 import 'package:gather/domain/room_snapshot.dart';
 import 'package:gather/state/room_controller.dart';
@@ -16,7 +17,7 @@ class FakeRepository implements RoomRepository {
   String? lastError;
 
   @override
-  Stream<RoomEvent> get events => _eventsController.stream;
+  Stream<RoomEvent> events(String code) => _eventsController.stream;
 
   @override
   Future<RoomSnapshot> getRoomState(
@@ -135,7 +136,7 @@ class FakeRepository implements RoomRepository {
 /// Build a minimal snapshot with voting active and a known remaining time.
 RoomSnapshot votingSnapshot(int remainingMs) {
   return RoomSnapshot(
-    room: const Room(
+    room: Room(
       code: 'ABCDE',
       title: 'Test',
       type: RoomType.meetup,
@@ -143,6 +144,8 @@ RoomSnapshot votingSnapshot(int remainingMs) {
       status: RoomStatus.voting,
       createdAt: DateTime.now(),
       expectedCount: 10,
+      wasTie: false,
+      winnerItemId: null,
       votingEndsAt: null, // not used; controller uses anchor instead
       currentStepId: 1,
     ),
@@ -150,6 +153,7 @@ RoomSnapshot votingSnapshot(int remainingMs) {
     items: [],
     steps: [],
     viewerMemberId: 1,
+    viewerGuestToken: 'viewer-token',
     votingRemainingMs: remainingMs,
   );
 }
@@ -254,6 +258,7 @@ void main() {
 
       repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
       await Future<void>.delayed(const Duration(seconds: 3));
+      await Future<void>.delayed(Duration.zero);
 
       expect(controller.reactions, isEmpty);
     });
@@ -262,19 +267,24 @@ void main() {
   group('secondsLeft', () {
     test('returns null when not voting', () async {
       final snapshot = RoomSnapshot(
-        room: const Room(
+        room: Room(
           code: 'ABCDE',
           title: 'Test',
           type: RoomType.meetup,
           ownerId: 'owner',
           status: RoomStatus.open,
           createdAt: DateTime.now(),
+          expectedCount: null,
+          wasTie: false,
+          winnerItemId: null,
           currentStepId: 1,
         ),
         members: [],
         items: [],
         steps: [],
         viewerMemberId: 1,
+        viewerGuestToken: 'viewer-token',
+        votingRemainingMs: null,
       );
       repo.snapshot = snapshot;
       await controller.open('ABCDE');
@@ -314,11 +324,10 @@ void main() {
     test('surface error via the error getter after a failed action', () async {
       final snapshot = votingSnapshot(60000);
       repo.snapshot = snapshot;
-      await controller.open('ABCDE');
+      await controller.open('ABCDE', viewerMemberId: 1);
 
       repo.lastError = 'Not in this room any more';
-      expect(controller.addItem('Too late'), throwsA(isA<GatherRuleException>()));
-      await Future<void>.delayed(Duration.zero);
+      await controller.addItem('Too late');
 
       expect(controller.error, 'Not in this room any more');
     });
@@ -326,11 +335,10 @@ void main() {
     test('clearError clears the error and notifies', () async {
       final snapshot = votingSnapshot(60000);
       repo.snapshot = snapshot;
-      await controller.open('ABCDE');
+      await controller.open('ABCDE', viewerMemberId: 1);
 
       repo.lastError = 'Something went wrong';
-      expect(controller.addItem('X'), throwsA(isA<GatherRuleException>()));
-      await Future<void>.delayed(Duration.zero);
+      await controller.addItem('X');
       expect(controller.error, isNotNull);
 
       controller.clearError();
@@ -347,19 +355,24 @@ void main() {
 
       // Simulate voting ending by returning a non-voting snapshot.
       repo.snapshot = RoomSnapshot(
-        room: const Room(
+        room: Room(
           code: 'ABCDE',
           title: 'Test',
           type: RoomType.meetup,
           ownerId: 'owner',
           status: RoomStatus.closed,
           createdAt: DateTime.now(),
+          expectedCount: null,
+          wasTie: false,
+          winnerItemId: null,
           currentStepId: 1,
         ),
         members: [],
         items: [],
         steps: [],
         viewerMemberId: 1,
+        viewerGuestToken: 'viewer-token',
+        votingRemainingMs: null,
       );
       await controller.refresh();
 

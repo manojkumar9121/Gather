@@ -1,7 +1,7 @@
 // TODO: Phase 0 — NOT YET IMPLEMENTED
-// This endpoint is scaffolding only. Deploying it will produce empty rooms with
-// no members, items, or events because none of the business logic is wired to
-// the database. See docs/ARCHITECTURE.md for the intended server implementation.
+// This endpoint is scaffolding only. Deploying it will throw at runtime because
+// none of the business logic is wired to the database. See docs/ARCHITECTURE.md
+// for the intended server implementation.
 import 'package:serverpod/serverpod.dart';
 
 /// Gather endpoint: room lifecycle, streaming, and rules (scaffolding).
@@ -41,12 +41,16 @@ class GatherEndpoint extends Endpoint {
     String code, {
     int? viewerMemberId,
   }) async {
-    return RoomSnapshot(room: Room(), members: [], items: [], steps: []);
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
   }
 
   /// Stream of room events for live sync.
   Stream<RoomEvent> roomEvents(Session session, String code) async* {
-    yield RoomEvent.memberJoined(1);
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
   }
 
   /// Add an item (question, suggestion, or stop).
@@ -56,7 +60,11 @@ class GatherEndpoint extends Endpoint {
     int memberId,
     String text, {
     bool isAnonymous = false,
-  }) async {}
+  }) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Toggle a vote. Rejects if not voting or past deadline.
   /// Denormalizes voteCount in the same transaction.
@@ -65,10 +73,18 @@ class GatherEndpoint extends Endpoint {
     String code,
     int memberId,
     int itemId,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Check in a member. For meetup rooms, joining via QR sets checkedInAt.
-  Future<void> checkIn(Session session, String code, int memberId) async {}
+  Future<void> checkIn(Session session, String code, int memberId) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Start a timed vote. Schedules a future call for close.
   Future<void> startVoting(
@@ -76,7 +92,11 @@ class GatherEndpoint extends Endpoint {
     String code,
     int memberId,
     Duration duration,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Idempotent vote close. Picks winner, resolves ties randomly.
   /// Lazy close runs if a vote arrives past deadline.
@@ -84,7 +104,11 @@ class GatherEndpoint extends Endpoint {
     Session session,
     String code, {
     int? byMemberId,
-  }) async {}
+  }) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Set or advance agenda step. Forward only; no rewind.
   Future<void> setCurrentStep(
@@ -92,14 +116,22 @@ class GatherEndpoint extends Endpoint {
     String code,
     int memberId,
     int stepId,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Advance to the next step. Final step stays put.
   Future<void> advanceStep(
     Session session,
     String code,
     int memberId,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Add an agenda step.
   Future<void> addStep(
@@ -108,7 +140,11 @@ class GatherEndpoint extends Endpoint {
     int memberId,
     String title,
     DateTime? at,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Remove an agenda step.
   Future<void> removeStep(
@@ -116,7 +152,11 @@ class GatherEndpoint extends Endpoint {
     String code,
     int memberId,
     int stepId,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Send an ephemeral emoji reaction.
   Future<void> sendReaction(
@@ -124,7 +164,11 @@ class GatherEndpoint extends Endpoint {
     String code,
     int memberId,
     String emoji,
-  ) async {}
+  ) async {
+    throw UnimplementedError(
+      'Server endpoint not implemented — use local mode until backend is ready.',
+    );
+  }
 
   /// Generate a 5-char room code with no ambiguous glyphs.
   String _generateCode() {

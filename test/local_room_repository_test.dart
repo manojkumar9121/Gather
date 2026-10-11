@@ -1352,7 +1352,10 @@ void main() {
       await _settle();
 
       expect(mismatchCalled, isTrue);
-      expect(await reopened.getRoomState(code), throwsA(isA<GatherRuleException>()));
+      await expectLater(
+        reopened.getRoomState(code),
+        throwsA(isA<GatherRuleException>()),
+      );
 
       reopened.dispose();
     });
