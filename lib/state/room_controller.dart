@@ -138,15 +138,13 @@ class RoomController extends ChangeNotifier {
     // Reactions are the one thing not in the snapshot, so they are handled
     // here and nowhere else.
     if (event.type == RoomEventType.reaction && event.emoji != null) {
-      _reactions.add(
-        LiveReaction(event.emoji!, event.memberId ?? 0, DateTime.now()),
-      );
+      final reaction = LiveReaction(event.emoji!, event.memberId ?? 0, DateTime.now());
+      _reactions.add(reaction);
       if (_reactions.length > 12) _reactions.removeAt(0);
       notifyListeners();
-      final memberId = event.memberId ?? 0;
       _reactionTimers.add(
         Timer(const Duration(seconds: 3), () {
-          _reactions.removeWhere((r) => r.memberId == memberId);
+          _reactions.removeWhere((r) => r.id == reaction.id);
           notifyListeners();
         }),
       );

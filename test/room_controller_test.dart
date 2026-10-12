@@ -262,6 +262,24 @@ void main() {
 
       expect(controller.reactions, isEmpty);
     });
+
+    test('reaction expiry removes only the matching reaction', () async {
+      final snapshot = votingSnapshot(60000);
+      repo.snapshot = snapshot;
+      await controller.open('ABCDE');
+      await Future<void>.delayed(Duration.zero);
+
+      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '✨', memberId: 1));
+
+      // Past the first reaction's expiry but before the second one expires.
+      await Future<void>.delayed(const Duration(milliseconds: 1800));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.reactions, hasLength(1));
+      expect(controller.reactions.first.emoji, '✨');
+    });
   });
 
   group('secondsLeft', () {

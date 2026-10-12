@@ -19,6 +19,7 @@ class JoinScreen extends StatefulWidget {
     this.initialCode,
     this.identity,
     this.identityStore,
+    this.viaQr = false,
   });
 
   final String? initialCode;
@@ -27,6 +28,7 @@ class JoinScreen extends StatefulWidget {
   /// not have to retype the name and emoji they already chose.
   final GuestIdentity? identity;
   final GuestIdentityStore? identityStore;
+  final bool viaQr;
 
   @override
   State<JoinScreen> createState() => _JoinScreenState();
@@ -41,6 +43,7 @@ class _JoinScreenState extends State<JoinScreen> {
   );
 
   late String _emoji = widget.identity?.emoji ?? kEmojiChoices.first;
+  late bool _joinViaQr = widget.viaQr;
   bool _busy = false;
   String? _error;
 
@@ -60,6 +63,7 @@ class _JoinScreenState extends State<JoinScreen> {
     if (code == null || !mounted) return;
     setState(() {
       _codeController.text = code;
+      _joinViaQr = true;
       _error = null;
     });
   }
@@ -99,7 +103,7 @@ class _JoinScreenState extends State<JoinScreen> {
         // rather than inflating the check-in count.
         guestId: identity?.guestId,
         // Scanning the QR in a meetup room is arriving, per the template.
-        viaQr: widget.initialCode != null,
+        viaQr: _joinViaQr,
       );
       // Not awaited: a disk write should never hold up the transition.
       unawaited(store.saveName(name, _emoji));
@@ -164,6 +168,10 @@ class _JoinScreenState extends State<JoinScreen> {
                       ),
                     ],
                     decoration: const InputDecoration(hintText: 'K7QP2'),
+                    onChanged: (_) {
+                      if (!_joinViaQr) return;
+                      setState(() => _joinViaQr = false);
+                    },
                   ),
                 ),
                 const SizedBox(width: Gap.sm),

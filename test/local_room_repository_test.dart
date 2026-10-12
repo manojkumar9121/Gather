@@ -814,6 +814,27 @@ void main() {
       expect(after.currentStep!.id, current.id);
     });
 
+    test('removing the current step does not rewind the pointer', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+
+      await repo.advanceStep(code: code, memberId: room.viewerMemberId!);
+      final atSecond = await repo.getRoomState(code);
+      final current = atSecond.currentStep!;
+      final previous = atSecond.steps.first;
+
+      await repo.removeStep(
+        code: code,
+        memberId: room.viewerMemberId!,
+        stepId: current.id,
+      );
+      final after = await repo.getRoomState(code);
+
+      expect(after.currentStep, isNotNull);
+      expect(after.currentStep!.id, isNot(previous.id));
+      expect(after.currentStep!.position, greaterThanOrEqualTo(previous.position));
+    });
+
     test('advancing past the end says so', () async {
       final room = await makeRoom();
       final code = room.room.code;
@@ -1261,6 +1282,48 @@ void main() {
       expect(restored.isPlanCompleted, isTrue);
       expect(restored.isEventEnded, isTrue);
       expect(restored.steps, isNotEmpty);
+    });
+
+    test('items, votes, and active vote state survive a restart', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+
+      await repo.addItem(code: code, memberId: owner, text: 'Option A');
+      await repo.addItem(code: code, memberId: owner, text: 'Option B');
+      final initial = await repo.getRoomState(code, viewerMemberId: owner);
+      final firstItemId = initial.items.first.item.id;
+
+      await repo.startVoting(
+        code: code,
+        memberId: owner,
+        duration: const Duration(minutes: 5),
+      );
+      await repo.toggleVote(code: code, memberId: owner, itemId: firstItemId);
+      await _settle();
+
+      final reopened = LocalRoomRepository();
+      final restored = await reopened.getRoomState(code, viewerMemberId: owner);
+
+      expect(restored.room.status, RoomStatus.voting);
+      expect(restored.room.votingEndsAt, isNotNull);
+      expect(restored.items, hasLength(2));
+      expect(restored.items.first.votes, 1);
+      expect(restored.items.first.votedByMe, isTrue);
+
+      reopened.dispose();
+    });
+
+    test('reads restored rooms immediately after construction', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      await _settle();
+
+      final reopened = LocalRoomRepository();
+      final restored = await reopened.getRoomState(code);
+
+      expect(restored.room.code, code);
+      reopened.dispose();
     });
 
     test(
