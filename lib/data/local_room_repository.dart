@@ -21,10 +21,11 @@ class LocalRoomRepository implements RoomRepository {
     this.voteOrderFreeze = const Duration(seconds: 10),
     this.onSchemaMismatch,
   }) : _random = random ?? Random.secure() {
-    unawaited(_loadRooms());
+    _ready = _loadRooms();
   }
 
   final Random _random;
+  late final Future<void> _ready;
   final Map<String, _RoomStore> _rooms = {};
   final Map<String, Timer> _closeTimers = {};
 
@@ -84,10 +85,13 @@ class LocalRoomRepository implements RoomRepository {
   // --- reads --------------------------------------------------------------
 
   @override
-  Stream<RoomEvent> events(String code) => _store(code).events.stream;
+  Stream<RoomEvent> events(String code) => Stream.fromFuture(
+    _ready,
+  ).asyncExpand((_) => _store(code).events.stream);
 
   @override
   Future<RoomSnapshot> getRoomState(String code, {int? viewerMemberId}) async {
+    await _ready;
     final store = _store(code);
     // Safety net for a missed scheduled close: a room whose deadline has
     // passed closes on read, so it can never sit stuck.
@@ -109,6 +113,7 @@ class LocalRoomRepository implements RoomRepository {
     int? expectedCount,
     String? guestId,
   }) async {
+    await _ready;
     final cleanTitle = title.trim();
     if (cleanTitle.isEmpty) {
       throw const GatherRuleException('Give the room a name first.');
@@ -161,6 +166,7 @@ class LocalRoomRepository implements RoomRepository {
     String? guestId,
     bool viaQr = false,
   }) async {
+    await _ready;
     final store = _store(code);
     final name = displayName.trim();
     if (name.isEmpty) {
@@ -208,6 +214,7 @@ class LocalRoomRepository implements RoomRepository {
     required String text,
     bool isAnonymous = false,
   }) async {
+    await _ready;
     final store = _store(code);
     final member = _requireMember(store, memberId);
 
@@ -249,6 +256,7 @@ class LocalRoomRepository implements RoomRepository {
     required int memberId,
     required int itemId,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireMember(store, memberId);
 
@@ -294,6 +302,7 @@ class LocalRoomRepository implements RoomRepository {
 
   @override
   Future<void> checkIn({required String code, required int memberId}) async {
+    await _ready;
     final store = _store(code);
     final member = _requireMember(store, memberId);
     if (store.room.isFinished) {
@@ -324,6 +333,7 @@ class LocalRoomRepository implements RoomRepository {
     required int memberId,
     required Duration duration,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
 
@@ -371,6 +381,7 @@ class LocalRoomRepository implements RoomRepository {
 
   @override
   Future<void> closeVoting({required String code, int? byMemberId}) async {
+    await _ready;
     final store = _store(code);
     if (byMemberId != null) {
       _requireOwner(store, byMemberId);
@@ -424,6 +435,7 @@ class LocalRoomRepository implements RoomRepository {
     required String title,
     DateTime? at,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
     final clean = title.trim();
@@ -447,10 +459,12 @@ class LocalRoomRepository implements RoomRepository {
     required int memberId,
     required int stepId,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
     final step = store.steps[stepId];
     if (step == null) return;
+    final removedPosition = step.position;
 
     final wasCurrent = store.room.currentStepId == stepId;
     store.steps.remove(stepId);
@@ -459,9 +473,7 @@ class LocalRoomRepository implements RoomRepository {
     if (wasCurrent) {
       // Stepping back is only allowed as a consequence of deleting the
       // pointer itself, never as a way to rewind the room.
-      final replacement = store.steps.isEmpty
-          ? null
-          : store.steps.values.first.id;
+      final replacement = _firstStepAtOrAfterPosition(store, removedPosition);
       store.room = store.room.withCurrentStep(replacement);
       if (replacement != null) {
         store.emit(RoomEvent.stepChanged(replacement));
@@ -475,6 +487,7 @@ class LocalRoomRepository implements RoomRepository {
     required int memberId,
     required int stepId,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
     final target = store.steps[stepId];
@@ -504,6 +517,7 @@ class LocalRoomRepository implements RoomRepository {
     required String code,
     required int memberId,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
 
@@ -541,6 +555,7 @@ class LocalRoomRepository implements RoomRepository {
     required String code,
     required int memberId,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
 
@@ -560,6 +575,7 @@ class LocalRoomRepository implements RoomRepository {
 
   @override
   Future<void> endEvent({required String code, required int memberId}) async {
+    await _ready;
     final store = _store(code);
     _requireOwner(store, memberId);
 
@@ -591,6 +607,7 @@ class LocalRoomRepository implements RoomRepository {
     required int memberId,
     required String emoji,
   }) async {
+    await _ready;
     final store = _store(code);
     _requireMember(store, memberId);
     // Never stored and never replayed: a late joiner should not see yesterday's
@@ -637,6 +654,17 @@ class LocalRoomRepository implements RoomRepository {
         position: i,
       );
     }
+
+    static int? _firstStepAtOrAfterPosition(_RoomStore store, int position) {
+      AgendaStep? replacement;
+      for (final step in store.steps.values) {
+        if (step.position < position) continue;
+        if (replacement == null || step.position < replacement.position) {
+          replacement = step;
+        }
+      }
+      return replacement?.id;
+    }
   }
 
   // --- persistence ---------------------------------------------------------
@@ -647,7 +675,7 @@ class LocalRoomRepository implements RoomRepository {
   ///
   /// When bumped, [onSchemaMismatch] (if provided) is invoked before clearing
   /// persisted rooms, giving the app a chance to surface a warning to the user.
-  static const _schemaVersion = 2;
+  static const _schemaVersion = 3;
 
   final void Function()? onSchemaMismatch;
 
@@ -693,6 +721,9 @@ class LocalRoomRepository implements RoomRepository {
               expectedCount: map['expectedCount'] as int?,
               winnerItemId: map['winnerItemId'] as int?,
               wasTie: (map['wasTie'] ?? false) as bool,
+              votingEndsAt: DateTime.tryParse(
+                map['votingEndsAt'] as String? ?? '',
+              ),
               // A pointer to a step that was never restored would strand the
               // plan, so only keep it when the step actually came back.
               currentStepId: _restoredStepId(map),
@@ -701,9 +732,12 @@ class LocalRoomRepository implements RoomRepository {
             ),
           );
           _restoreSteps(store, map['steps']);
+          _restoreItems(store, map['items']);
+          _restoreVotes(store, map['votes']);
           _restoreMembers(store, map['members'], map['ownerMemberId'] as int?);
           store._onChanged = () => unawaited(_saveRooms());
           _rooms[code] = store;
+          _scheduleRestoredClose(store);
         }
       }
     } catch (_) {
@@ -735,6 +769,40 @@ class LocalRoomRepository implements RoomRepository {
       );
       store.steps[step.id] = step;
       if (step.id >= store._nextStepId) store._nextStepId = step.id + 1;
+    }
+  }
+
+  static void _restoreItems(_RoomStore store, Object? raw) {
+    if (raw is! List) return;
+    for (final entry in raw) {
+      final map = entry as Map<String, dynamic>;
+      final item = Item(
+        id: map['id'] as int,
+        authorMemberId: map['authorMemberId'] as int,
+        kind: ItemKind.values.firstWhere(
+          (k) => k.wireName == map['kind'],
+          orElse: () => ItemKind.suggestion,
+        ),
+        text: map['text'] as String,
+        isAnonymous: (map['isAnonymous'] ?? false) as bool,
+        createdAt:
+            DateTime.tryParse(map['createdAt'] as String? ?? '') ??
+            DateTime.now(),
+        voteCount: map['voteCount'] as int? ?? 0,
+      );
+      store.items[item.id] = item;
+      if (item.id >= store._nextItemId) store._nextItemId = item.id + 1;
+    }
+  }
+
+  static void _restoreVotes(_RoomStore store, Object? raw) {
+    if (raw is! List) return;
+    for (final entry in raw) {
+      final map = entry as Map<String, dynamic>;
+      final key = map['key'] as String?;
+      if (key == null || key.isEmpty) continue;
+      final at = DateTime.tryParse(map['at'] as String? ?? '') ?? DateTime.now();
+      store.votes[key] = at;
     }
   }
 
@@ -779,6 +847,7 @@ class LocalRoomRepository implements RoomRepository {
           'expectedCount': s.room.expectedCount,
           'currentStepId': s.room.currentStepId,
           'status': s.room.status.wireName,
+          'votingEndsAt': s.room.votingEndsAt?.toIso8601String(),
           'ownerId': s.room.ownerId,
           'winnerItemId': s.room.winnerItemId,
           'wasTie': s.room.wasTie,
@@ -806,6 +875,22 @@ class LocalRoomRepository implements RoomRepository {
                 'checkedInAt': m.checkedInAt?.toIso8601String(),
               },
           ],
+          'items': [
+            for (final item in s.items.values)
+              {
+                'id': item.id,
+                'authorMemberId': item.authorMemberId,
+                'kind': item.kind.wireName,
+                'text': item.text,
+                'isAnonymous': item.isAnonymous,
+                'createdAt': item.createdAt.toIso8601String(),
+                'voteCount': item.voteCount,
+              },
+          ],
+          'votes': [
+            for (final vote in s.votes.entries)
+              {'key': vote.key, 'at': vote.value.toIso8601String()},
+          ],
         });
       }
       await prefs.setString('gather.rooms', jsonEncode(list));
@@ -815,6 +900,22 @@ class LocalRoomRepository implements RoomRepository {
     } catch (_) {
       // Persistence best-effort for local mode.
     }
+  }
+
+  void _scheduleRestoredClose(_RoomStore store) {
+    if (store.room.status != RoomStatus.voting) return;
+    final endsAt = store.room.votingEndsAt;
+    if (endsAt == null) return;
+    final remaining = endsAt.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      unawaited(closeVoting(code: store.room.code).catchError((_) {}));
+      return;
+    }
+    _closeTimers[store.room.code]?.cancel();
+    _closeTimers[store.room.code] = Timer(remaining, () {
+      _closeTimers.remove(store.room.code);
+      unawaited(closeVoting(code: store.room.code));
+    });
   }
 }
 

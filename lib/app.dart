@@ -90,6 +90,7 @@ class _GatherAppState extends State<GatherApp> with WidgetsBindingObserver {
           initialCode: code,
           identity: _identity,
           identityStore: _identityStore,
+          viaQr: true,
         ),
       ),
     );
