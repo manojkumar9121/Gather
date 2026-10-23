@@ -28,10 +28,7 @@ class FakeRepository implements RoomRepository {
   Stream<RoomEvent> events(String code) => _eventsController.stream;
 
   @override
-  Future<RoomSnapshot> getRoomState(
-    String code, {
-    int? viewerMemberId,
-  }) async {
+  Future<RoomSnapshot> getRoomState(String code, {int? viewerMemberId}) async {
     callCount++;
     onGetRoomState?.call();
     if (failure != null) throw failure!;
@@ -90,10 +87,7 @@ class FakeRepository implements RoomRepository {
   }) async {}
 
   @override
-  Future<void> closeVoting({
-    required String code,
-    int? byMemberId,
-  }) async {}
+  Future<void> closeVoting({required String code, int? byMemberId}) async {}
 
   @override
   Future<void> addStep({
@@ -130,10 +124,7 @@ class FakeRepository implements RoomRepository {
   }) async {}
 
   @override
-  Future<void> endEvent({
-    required String code,
-    required int memberId,
-  }) async {}
+  Future<void> endEvent({required String code, required int memberId}) async {}
 
   @override
   Future<void> sendReaction({
@@ -277,7 +268,9 @@ void main() {
       // Give the open stream subscription time to settle.
       await Future<void>.delayed(Duration.zero);
 
-      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      repo.emit(
+        const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1),
+      );
       await Future<void>.delayed(Duration.zero);
 
       expect(controller.reactions, hasLength(1));
@@ -292,7 +285,9 @@ void main() {
       // Give the open stream subscription time to settle.
       await Future<void>.delayed(Duration.zero);
 
-      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      repo.emit(
+        const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1),
+      );
       await Future<void>.delayed(const Duration(seconds: 3));
       await Future<void>.delayed(Duration.zero);
 
@@ -305,9 +300,13 @@ void main() {
       await controller.open('ABCDE');
       await Future<void>.delayed(Duration.zero);
 
-      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      repo.emit(
+        const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 1400));
-      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '✨', memberId: 1));
+      repo.emit(
+        const RoomEvent(RoomEventType.reaction, emoji: '✨', memberId: 1),
+      );
 
       // Past the first reaction's expiry but before the second one expires.
       await Future<void>.delayed(const Duration(milliseconds: 1800));
@@ -324,7 +323,9 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       final before = repo.callCount;
-      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      repo.emit(
+        const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1),
+      );
       await Future<void>.delayed(Duration.zero);
 
       expect(controller.reactions, hasLength(1));

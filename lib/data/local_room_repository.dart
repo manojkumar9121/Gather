@@ -87,9 +87,8 @@ class LocalRoomRepository implements RoomRepository {
   // --- reads --------------------------------------------------------------
 
   @override
-  Stream<RoomEvent> events(String code) => Stream.fromFuture(
-    _ready,
-  ).asyncExpand((_) => _store(code).events.stream);
+  Stream<RoomEvent> events(String code) =>
+      Stream.fromFuture(_ready).asyncExpand((_) => _store(code).events.stream);
 
   @override
   Future<RoomSnapshot> getRoomState(String code, {int? viewerMemberId}) async {
@@ -755,7 +754,11 @@ class LocalRoomRepository implements RoomRepository {
             _restoreSteps(store, map['steps']);
             _restoreItems(store, map['items']);
             _restoreVotes(store, map['votes']);
-            _restoreMembers(store, map['members'], map['ownerMemberId'] as int?);
+            _restoreMembers(
+              store,
+              map['members'],
+              map['ownerMemberId'] as int?,
+            );
             store._onChanged = () => unawaited(_saveRooms());
             _rooms[code] = store;
             _scheduleRestoredClose(store);
@@ -832,7 +835,8 @@ class LocalRoomRepository implements RoomRepository {
       final map = entry as Map<String, dynamic>;
       final key = map['key'] as String?;
       if (key == null || key.isEmpty) continue;
-      final at = DateTime.tryParse(map['at'] as String? ?? '') ?? DateTime.now();
+      final at =
+          DateTime.tryParse(map['at'] as String? ?? '') ?? DateTime.now();
       store.votes[key] = at;
     }
   }

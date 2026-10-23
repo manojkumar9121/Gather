@@ -141,14 +141,16 @@ class RoomController extends ChangeNotifier {
     // The repository may gate the stream behind room loading and report an
     // unknown room as a stream error rather than a thrown exception, so the
     // subscription needs an error path of its own.
-    _eventSub = _repository.events(code).listen(
-      _onEvent,
-      onError: (Object e, StackTrace st) {
-        _logUnexpected('events', e, st);
-        _error = e is GatherRuleException ? e.message : _unexpectedError;
-        notifyListeners();
-      },
-    );
+    _eventSub = _repository
+        .events(code)
+        .listen(
+          _onEvent,
+          onError: (Object e, StackTrace st) {
+            _logUnexpected('events', e, st);
+            _error = e is GatherRuleException ? e.message : _unexpectedError;
+            notifyListeners();
+          },
+        );
   }
 
   Future<void> setViewer(int memberId) async {
