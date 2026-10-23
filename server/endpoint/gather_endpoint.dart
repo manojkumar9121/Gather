@@ -2,6 +2,8 @@
 // This endpoint is scaffolding only. Deploying it will throw at runtime because
 // none of the business logic is wired to the database. See docs/ARCHITECTURE.md
 // for the intended server implementation.
+import 'dart:math';
+
 import 'package:serverpod/serverpod.dart';
 
 /// Gather endpoint: room lifecycle, streaming, and rules (scaffolding).
@@ -123,11 +125,7 @@ class GatherEndpoint extends Endpoint {
   }
 
   /// Advance to the next step. Final step stays put.
-  Future<void> advanceStep(
-    Session session,
-    String code,
-    int memberId,
-  ) async {
+  Future<void> advanceStep(Session session, String code, int memberId) async {
     throw UnimplementedError(
       'Server endpoint not implemented — use local mode until backend is ready.',
     );
@@ -222,7 +220,8 @@ class RoomEvent {
   RoomEvent.checkedIn(this.count, this.total) : type = 'checkedIn';
   RoomEvent.reaction(this.emoji, this.memberId) : type = 'reaction';
   RoomEvent.votingStarted(this.remainingMs) : type = 'votingStarted';
-  RoomEvent.votingClosed(this.winnerItemId, this.wasTie) : type = 'votingClosed';
+  RoomEvent.votingClosed(this.winnerItemId, this.wasTie)
+    : type = 'votingClosed';
   RoomEvent.stepChanged(this.stepId) : type = 'stepChanged';
 }
 
@@ -240,6 +239,12 @@ class Room {
   final bool wasTie;
   final int? currentStepId;
 
+  /// Parity with the client's `Room` (lib/domain/models.dart): the agenda can
+  /// be completed independently of the event actually ending. Without these
+  /// the server cannot persist and return the same room state as local mode.
+  final bool agendaCompleted;
+  final bool eventEnded;
+
   Room({
     required this.code,
     required this.title,
@@ -252,6 +257,8 @@ class Room {
     this.winnerItemId,
     this.wasTie = false,
     this.currentStepId,
+    this.agendaCompleted = false,
+    this.eventEnded = false,
   });
 }
 

@@ -1,13 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../domain/models.dart';
 import '../domain/room_event.dart';
 import '../domain/room_snapshot.dart';
 import '../domain/room_template.dart';
 import 'room_repository.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 /// In-memory room store. Holds every rule the server will hold, so the domain
 /// behaviour is identical once the backend takes over.
@@ -442,15 +444,24 @@ class LocalRoomRepository implements RoomRepository {
     if (clean.isEmpty) {
       throw const GatherRuleException('Give the step a name.');
     }
-    store.newStep(title: clean, position: store.steps.length, at: at);
+    final step = store.newStep(
+      title: clean,
+      position: store.steps.length,
+      at: at,
+    );
 
     // A room with no pointer yet starts on its first step.
     if (store.room.currentStepId == null && store.steps.isNotEmpty) {
       store.room = store.room.copyWith(
         currentStepId: store.steps.values.first.id,
       );
-      store.emit(RoomEvent.stepChanged(store.room.currentStepId!));
     }
+
+    // Every successful mutation must broadcast — [_RoomStore.emit] is also
+    // what persists the room. Appending to a plan that already had a pointer
+    // used to happen silently: no event, no save, and the step vanished on
+    // restart.
+    store.emit(RoomEvent.stepChanged(store.room.currentStepId ?? step.id));
   }
 
   @override
@@ -472,13 +483,18 @@ class LocalRoomRepository implements RoomRepository {
 
     if (wasCurrent) {
       // Stepping back is only allowed as a consequence of deleting the
-      // pointer itself, never as a way to rewind the room.
+      // pointer itself, never as a way to rewind the room. The step that took
+      // the removed one's slot inherits the pointer.
       final replacement = _firstStepAtOrAfterPosition(store, removedPosition);
       store.room = store.room.withCurrentStep(replacement);
-      if (replacement != null) {
-        store.emit(RoomEvent.stepChanged(replacement));
-      }
     }
+
+    // Broadcast on every successful removal — deleting a non-current step, or
+    // the last remaining step (no replacement to point at), used to be silent:
+    // no event, no save, and the removal was undone by a restart. stepId -1 is
+    // the existing "state changed, no step pointer" signal (completePlan and
+    // endEvent use it the same way).
+    store.emit(RoomEvent.stepChanged(store.room.currentStepId ?? -1));
   }
 
   @override
@@ -654,17 +670,21 @@ class LocalRoomRepository implements RoomRepository {
         position: i,
       );
     }
+  }
 
-    static int? _firstStepAtOrAfterPosition(_RoomStore store, int position) {
-      AgendaStep? replacement;
-      for (final step in store.steps.values) {
-        if (step.position < position) continue;
-        if (replacement == null || step.position < replacement.position) {
-          replacement = step;
-        }
+  /// The step that should take over when the step at [position] disappears:
+  /// the first surviving step at or after that slot. Dart does not allow a
+  /// `static` declaration inside another method body, so this lives at class
+  /// scope next to [_reindex].
+  static int? _firstStepAtOrAfterPosition(_RoomStore store, int position) {
+    AgendaStep? replacement;
+    for (final step in store.steps.values) {
+      if (step.position < position) continue;
+      if (replacement == null || step.position < replacement.position) {
+        replacement = step;
       }
-      return replacement?.id;
     }
+    return replacement?.id;
   }
 
   // --- persistence ---------------------------------------------------------
@@ -697,51 +717,62 @@ class LocalRoomRepository implements RoomRepository {
       if (data != null && data.isNotEmpty) {
         final list = jsonDecode(data) as List<dynamic>;
         for (final item in list) {
-          final map = item as Map<String, dynamic>;
-          final code = map['code'] as String;
-          if (_rooms.containsKey(code)) continue;
-          final typeName = map['type'] as String? ?? 'meetup';
-          final type = RoomType.values.firstWhere(
-            (t) => t.wireName == typeName,
-            orElse: () => RoomType.meetup,
-          );
-          final store = _RoomStore(
-            Room(
-              code: code,
-              title: map['title'] as String? ?? 'Restored room',
-              type: type,
-              ownerId: map['ownerId'] as String? ?? 'local-owner',
-              status: RoomStatus.values.firstWhere(
-                (s) => s.wireName == map['status'],
-                orElse: () => RoomStatus.open,
+          try {
+            final map = item as Map<String, dynamic>;
+            final code = map['code'] as String;
+            if (_rooms.containsKey(code)) continue;
+            final typeName = map['type'] as String? ?? 'meetup';
+            final type = RoomType.values.firstWhere(
+              (t) => t.wireName == typeName,
+              orElse: () => RoomType.meetup,
+            );
+            final store = _RoomStore(
+              Room(
+                code: code,
+                title: map['title'] as String? ?? 'Restored room',
+                type: type,
+                ownerId: map['ownerId'] as String? ?? 'local-owner',
+                status: RoomStatus.values.firstWhere(
+                  (s) => s.wireName == map['status'],
+                  orElse: () => RoomStatus.open,
+                ),
+                createdAt:
+                    DateTime.tryParse(map['createdAt'] as String? ?? '') ??
+                    DateTime.now(),
+                expectedCount: map['expectedCount'] as int?,
+                winnerItemId: map['winnerItemId'] as int?,
+                wasTie: (map['wasTie'] ?? false) as bool,
+                votingEndsAt: DateTime.tryParse(
+                  map['votingEndsAt'] as String? ?? '',
+                ),
+                // A pointer to a step that was never restored would strand the
+                // plan, so only keep it when the step actually came back.
+                currentStepId: _restoredStepId(map),
+                agendaCompleted: (map['agendaCompleted'] ?? false) as bool,
+                eventEnded: (map['eventEnded'] ?? false) as bool,
               ),
-              createdAt:
-                  DateTime.tryParse(map['createdAt'] as String? ?? '') ??
-                  DateTime.now(),
-              expectedCount: map['expectedCount'] as int?,
-              winnerItemId: map['winnerItemId'] as int?,
-              wasTie: (map['wasTie'] ?? false) as bool,
-              votingEndsAt: DateTime.tryParse(
-                map['votingEndsAt'] as String? ?? '',
-              ),
-              // A pointer to a step that was never restored would strand the
-              // plan, so only keep it when the step actually came back.
-              currentStepId: _restoredStepId(map),
-              agendaCompleted: (map['agendaCompleted'] ?? false) as bool,
-              eventEnded: (map['eventEnded'] ?? false) as bool,
-            ),
-          );
-          _restoreSteps(store, map['steps']);
-          _restoreItems(store, map['items']);
-          _restoreVotes(store, map['votes']);
-          _restoreMembers(store, map['members'], map['ownerMemberId'] as int?);
-          store._onChanged = () => unawaited(_saveRooms());
-          _rooms[code] = store;
-          _scheduleRestoredClose(store);
+            );
+            _restoreSteps(store, map['steps']);
+            _restoreItems(store, map['items']);
+            _restoreVotes(store, map['votes']);
+            _restoreMembers(store, map['members'], map['ownerMemberId'] as int?);
+            store._onChanged = () => unawaited(_saveRooms());
+            _rooms[code] = store;
+            _scheduleRestoredClose(store);
+          } catch (e, st) {
+            // Corruption is handled per record: one malformed room must not
+            // abort the rooms stored after it.
+            if (kDebugMode) {
+              debugPrint('Gather: skipping unpersistable room record: $e\n$st');
+            }
+          }
         }
       }
-    } catch (_) {
-      // Persistence best-effort for local mode.
+    } catch (e, st) {
+      // Persistence best-effort for local mode, but never fully silent.
+      if (kDebugMode) {
+        debugPrint('Gather: could not restore rooms: $e\n$st');
+      }
     }
   }
 
@@ -897,8 +928,12 @@ class LocalRoomRepository implements RoomRepository {
       // Persist the schema version alongside the data so a future read can
       // detect structural changes before deserializing stale rooms.
       await prefs.setInt('gather.schemaVersion', _schemaVersion);
-    } catch (_) {
-      // Persistence best-effort for local mode.
+    } catch (e, st) {
+      // Persistence is best-effort in local mode, but a silent failure reads
+      // as "saved" to the user — log it so it is at least diagnosable.
+      if (kDebugMode) {
+        debugPrint('Gather: failed to persist rooms: $e\n$st');
+      }
     }
   }
 

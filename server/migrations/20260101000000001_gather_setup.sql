@@ -10,7 +10,9 @@ CREATE TABLE gather_room (
   voting_ends_at TIMESTAMP WITH TIME ZONE,
   winner_item_id INTEGER,
   was_tie BOOLEAN DEFAULT FALSE,
-  current_step_id INTEGER
+  current_step_id INTEGER,
+  agenda_completed BOOLEAN DEFAULT FALSE,
+  event_ended BOOLEAN DEFAULT FALSE
 );
 
 CREATE INDEX gather_room_owner_idx ON gather_room(owner_id);

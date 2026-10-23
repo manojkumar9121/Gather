@@ -13,6 +13,10 @@ fields:
   winnerItemId: int?
   wasTie: bool
   currentStepId: int?
+  # Parity with the client Room model (lib/domain/models.dart): the agenda can
+  # be completed independently of the event actually ending.
+  agendaCompleted: bool
+  eventEnded: bool
 indexes:
   gather_room_code_idx:
     fields: code

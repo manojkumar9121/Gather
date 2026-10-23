@@ -52,19 +52,25 @@ class RoomController extends ChangeNotifier {
   Timer? _ticker;
   final List<Timer> _reactionTimers = [];
 
+  /// Monotonic fetch sequence: a slow, stale snapshot response must never
+  /// overwrite a newer one once a real network is in play.
+  int _fetchSeq = 0;
+
   /// The countdown is anchored to the server, not to this device's clock.
   ///
   /// A phone whose clock is three minutes fast would otherwise show the vote
   /// ending three minutes early, and on two phones that means two different
   /// reveal times. The server tells us how long is left, and we count down
-  /// from that using the device's own monotonic elapsed time.
+  /// from that with a [Stopwatch], whose elapsed time is monotonic — a
+  /// wall-clock change mid-vote cannot jump the countdown.
   int? _anchorRemainingMs;
-  DateTime? _anchorAt;
-  DateTime _now = DateTime.now();
-  DateTime get now => _now;
+  final Stopwatch _anchorElapsed = Stopwatch();
 
-  /// Opens a room: fetch the snapshot first, then subscribe. The fetch is what
-  /// makes a late join or a phone waking from sleep land in the right state.
+  /// Opens a room: subscribe first, then fetch the snapshot. Subscribing
+  /// first closes the race where a mutation lands between the snapshot and
+  /// the subscription — that event is now received and triggers a refresh,
+  /// so the view converges instead of staying stale. The fetch is what makes
+  /// a late join or a phone waking from sleep land in the right state.
   Future<void> open(String code, {int? viewerMemberId}) async {
     _code = code;
     _viewerMemberId = viewerMemberId;
@@ -73,10 +79,17 @@ class RoomController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _fetch();
       await _resubscribe();
+      await _fetch();
     } on GatherRuleException catch (e) {
       _error = e.message;
+      _snapshot = null;
+    } catch (e, st) {
+      // Anything that is not a rule rejection (timeouts, transport failures)
+      // must not escape into the zone: surface it as a retryable error and
+      // keep the diagnostic detail in the log.
+      _logUnexpected('open', e, st);
+      _error = _unexpectedError;
       _snapshot = null;
     } finally {
       _busy = false;
@@ -92,10 +105,13 @@ class RoomController extends ChangeNotifier {
   Future<void> resync() async {
     if (_code == null) return;
     try {
-      await _fetch();
       await _resubscribe();
+      await _fetch();
     } on GatherRuleException catch (e) {
       _error = e.message;
+    } catch (e, st) {
+      _logUnexpected('resync', e, st);
+      _error = _unexpectedError;
     }
     notifyListeners();
   }
@@ -103,12 +119,18 @@ class RoomController extends ChangeNotifier {
   Future<void> _fetch() async {
     final code = _code;
     if (code == null) return;
-    _snapshot = await _repository.getRoomState(
+    final seq = ++_fetchSeq;
+    final snapshot = await _repository.getRoomState(
       code,
       viewerMemberId: _viewerMemberId,
     );
+    // A newer fetch was started while this one was in flight (an event
+    // arrived, another action ran). Drop the stale result rather than let a
+    // slow response roll the room back to an older state.
+    if (seq != _fetchSeq) return;
+    _snapshot = snapshot;
     _error = null;
-    _reanchor(_snapshot?.votingRemainingMs);
+    _reanchor(snapshot.votingRemainingMs);
     _syncTicker();
   }
 
@@ -116,7 +138,17 @@ class RoomController extends ChangeNotifier {
     final code = _code;
     if (code == null) return;
     await _eventSub?.cancel();
-    _eventSub = _repository.events(code).listen(_onEvent);
+    // The repository may gate the stream behind room loading and report an
+    // unknown room as a stream error rather than a thrown exception, so the
+    // subscription needs an error path of its own.
+    _eventSub = _repository.events(code).listen(
+      _onEvent,
+      onError: (Object e, StackTrace st) {
+        _logUnexpected('events', e, st);
+        _error = e is GatherRuleException ? e.message : _unexpectedError;
+        notifyListeners();
+      },
+    );
   }
 
   Future<void> setViewer(int memberId) async {
@@ -130,24 +162,40 @@ class RoomController extends ChangeNotifier {
       await _fetch();
     } on GatherRuleException catch (e) {
       _error = e.message;
+    } catch (e, st) {
+      // Keep the last valid snapshot and show a retryable error instead of
+      // letting a transport failure escape as an unhandled async error —
+      // event-driven refreshes are fire-and-forget.
+      _logUnexpected('refresh', e, st);
+      _error = _unexpectedError;
     }
     notifyListeners();
   }
 
   void _onEvent(RoomEvent event) {
     // Reactions are the one thing not in the snapshot, so they are handled
-    // here and nowhere else.
+    // here and nowhere else. They change no room state, so they must not
+    // trigger a full-room refresh: a burst of reactions would otherwise turn
+    // into a burst of state fetches.
     if (event.type == RoomEventType.reaction && event.emoji != null) {
-      final reaction = LiveReaction(event.emoji!, event.memberId ?? 0, DateTime.now());
+      final reaction = LiveReaction(
+        event.emoji!,
+        event.memberId ?? 0,
+        DateTime.now(),
+      );
       _reactions.add(reaction);
       if (_reactions.length > 12) _reactions.removeAt(0);
       notifyListeners();
-      _reactionTimers.add(
-        Timer(const Duration(seconds: 3), () {
-          _reactions.removeWhere((r) => r.id == reaction.id);
-          notifyListeners();
-        }),
-      );
+      // The callback drops its own timer from the list, so the list cannot
+      // grow without bound over a long session.
+      late final Timer timer;
+      timer = Timer(const Duration(seconds: 3), () {
+        _reactionTimers.remove(timer);
+        _reactions.removeWhere((r) => r.id == reaction.id);
+        notifyListeners();
+      });
+      _reactionTimers.add(timer);
+      return;
     }
     if (event.type == RoomEventType.votingStarted) {
       _reanchor(event.remainingMs);
@@ -158,18 +206,22 @@ class RoomController extends ChangeNotifier {
   void _reanchor(int? remainingMs) {
     if (remainingMs == null) {
       _anchorRemainingMs = null;
-      _anchorAt = null;
+      _anchorElapsed
+        ..stop()
+        ..reset();
       return;
     }
     _anchorRemainingMs = remainingMs;
-    _anchorAt = DateTime.now();
+    _anchorElapsed
+      ..reset()
+      ..start();
   }
 
   void _syncTicker() {
     final needsTicker = _snapshot?.room.isVoting ?? false;
     if (needsTicker && _ticker == null) {
       _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
-        _now = DateTime.now();
+        // The stopwatch drives the countdown; this tick only repaints it.
         notifyListeners();
       });
     } else if (!needsTicker && _ticker != null) {
@@ -178,14 +230,14 @@ class RoomController extends ChangeNotifier {
     }
   }
 
-  /// Seconds left, counted from the server's anchor. Never negative.
+  /// Seconds left, counted from the server's anchor on the monotonic
+  /// stopwatch, so a wall-clock change mid-vote cannot jump the countdown.
+  /// Never negative.
   int? get secondsLeft {
     final anchor = _anchorRemainingMs;
-    final at = _anchorAt;
-    if (anchor == null || at == null) return null;
+    if (anchor == null) return null;
     if (!(_snapshot?.room.isVoting ?? false)) return null;
-    final elapsed = DateTime.now().difference(at).inMilliseconds;
-    final remaining = anchor - elapsed;
+    final remaining = anchor - _anchorElapsed.elapsedMilliseconds;
     return (remaining <= 0 ? 0 : remaining) ~/ 1000;
   }
 
@@ -281,6 +333,9 @@ class RoomController extends ChangeNotifier {
       );
     } on GatherRuleException {
       // Nothing to do. Reactions are best-effort by design.
+    } catch (e, st) {
+      // Same deal for transport failures: never surface, only log.
+      _logUnexpected('react', e, st);
     }
   }
 
@@ -292,7 +347,18 @@ class RoomController extends ChangeNotifier {
     } on GatherRuleException catch (e) {
       _error = e.message;
       notifyListeners();
+    } catch (e, st) {
+      _logUnexpected('action', e, st);
+      _error = _unexpectedError;
+      notifyListeners();
     }
+  }
+
+  static const _unexpectedError =
+      'Something went wrong. Check your connection and try again.';
+
+  void _logUnexpected(String what, Object error, StackTrace stack) {
+    debugPrint('RoomController: $what failed: $error\n$stack');
   }
 
   String _requireCode() {
@@ -321,7 +387,9 @@ class RoomController extends ChangeNotifier {
   void dispose() {
     _eventSub?.cancel();
     _ticker?.cancel();
-    for (final timer in _reactionTimers) timer.cancel();
+    for (final timer in _reactionTimers) {
+      timer.cancel();
+    }
     super.dispose();
   }
 }

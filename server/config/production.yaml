@@ -1,7 +1,12 @@
 server:
   port: 8080
-  development: true
+  # A file named production.yaml must not boot in development mode: it enables
+  # verbose errors and relaxed security. Flip this back only for local runs of
+  # the production config.
+  development: false
   database:
+    # Replace with your real database host when PostgreSQL does not run on the
+    # same machine (managed service, container, etc.).
     host: localhost
     port: 5432
     user: postgres

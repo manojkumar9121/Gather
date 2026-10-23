@@ -16,6 +16,14 @@ class FakeRepository implements RoomRepository {
   int callCount = 0;
   String? lastError;
 
+  /// A non-rule failure (e.g. a transport error) to throw from repository
+  /// calls, for testing that unexpected failures never escape the controller.
+  Object? failure;
+
+  /// Called at the start of [getRoomState], so tests can emit an event while
+  /// the fetch is in flight.
+  void Function()? onGetRoomState;
+
   @override
   Stream<RoomEvent> events(String code) => _eventsController.stream;
 
@@ -25,6 +33,8 @@ class FakeRepository implements RoomRepository {
     int? viewerMemberId,
   }) async {
     callCount++;
+    onGetRoomState?.call();
+    if (failure != null) throw failure!;
     if (lastError != null) throw GatherRuleException(lastError!);
     return snapshot!;
   }
@@ -58,7 +68,9 @@ class FakeRepository implements RoomRepository {
     required int memberId,
     required String text,
     bool isAnonymous = false,
-  }) async {}
+  }) async {
+    if (failure != null) throw failure!;
+  }
 
   @override
   Future<void> toggleVote({
@@ -198,6 +210,30 @@ void main() {
       await controller.open('ABCDE');
       expect(controller.busy, isFalse);
     });
+
+    test(
+      'an event emitted while the snapshot is being fetched is not missed',
+      () async {
+        final snapshot = votingSnapshot(60000);
+        repo.snapshot = snapshot;
+        // The event lands after the subscription exists but before the fetch
+        // completes — exactly the window the snapshot-first ordering used to
+        // drop it in. Fire once: a read must not keep emitting, or the
+        // event→refresh→fetch chain would never settle.
+        var emitted = false;
+        repo.onGetRoomState = () {
+          if (emitted) return;
+          emitted = true;
+          repo.emit(const RoomEvent(RoomEventType.stepChanged, stepId: 2));
+        };
+
+        await controller.open('ABCDE');
+        // The event must trigger a refresh on top of the initial fetch.
+        await Future<void>.delayed(Duration.zero);
+
+        expect(repo.callCount, greaterThanOrEqualTo(2));
+      },
+    );
   });
 
   group('resync', () {
@@ -280,6 +316,21 @@ void main() {
       expect(controller.reactions, hasLength(1));
       expect(controller.reactions.first.emoji, '✨');
     });
+
+    test('reaction events do not trigger a snapshot refresh', () async {
+      final snapshot = votingSnapshot(60000);
+      repo.snapshot = snapshot;
+      await controller.open('ABCDE');
+      await Future<void>.delayed(Duration.zero);
+
+      final before = repo.callCount;
+      repo.emit(const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.reactions, hasLength(1));
+      // Reactions change no room state, so no fetch may be spent on them.
+      expect(repo.callCount, before);
+    });
   });
 
   group('secondsLeft', () {
@@ -361,6 +412,40 @@ void main() {
 
       controller.clearError();
       expect(controller.error, isNull);
+    });
+
+    test('an unexpected failure during refresh does not escape', () async {
+      final snapshot = votingSnapshot(60000);
+      repo.snapshot = snapshot;
+      await controller.open('ABCDE', viewerMemberId: 1);
+
+      repo.failure = StateError('socket closed');
+      // Must not throw: transport failures surface as a retryable error.
+      await controller.refresh();
+
+      expect(controller.error, isNotNull);
+      // The last good snapshot is kept for rendering.
+      expect(controller.snapshot, same(snapshot));
+    });
+
+    test('an unexpected failure during an action does not escape', () async {
+      final snapshot = votingSnapshot(60000);
+      repo.snapshot = snapshot;
+      await controller.open('ABCDE', viewerMemberId: 1);
+
+      repo.failure = StateError('socket closed');
+      await controller.addItem('Hello');
+
+      expect(controller.error, isNotNull);
+    });
+
+    test('open survives an unexpected repository failure', () async {
+      repo.failure = StateError('network down');
+      await controller.open('ABCDE');
+
+      expect(controller.error, isNotNull);
+      expect(controller.snapshot, isNull);
+      expect(controller.busy, isFalse);
     });
   });
 

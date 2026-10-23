@@ -832,7 +832,10 @@ void main() {
 
       expect(after.currentStep, isNotNull);
       expect(after.currentStep!.id, isNot(previous.id));
-      expect(after.currentStep!.position, greaterThanOrEqualTo(previous.position));
+      expect(
+        after.currentStep!.position,
+        greaterThanOrEqualTo(previous.position),
+      );
     });
 
     test('advancing past the end says so', () async {
@@ -956,6 +959,115 @@ void main() {
       expect(after.steps, hasLength(1));
       expect(after.currentStep?.title, 'Opening act');
     });
+
+    test(
+      'adding a step to an existing agenda broadcasts and persists',
+      () async {
+        final room = await makeRoom();
+        final code = room.room.code;
+        final owner = room.viewerMemberId!;
+        final before = await repo.getRoomState(code, viewerMemberId: owner);
+        final currentId = before.room.currentStepId;
+        // The seeded agenda already has a pointer — this is the case that used
+        // to swallow the event.
+        expect(currentId, isNotNull);
+
+        final events = <RoomEvent>[];
+        final sub = repo.events(code).listen(events.add);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        await repo.addStep(code: code, memberId: owner, title: 'Late addition');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await sub.cancel();
+        await _settle();
+
+        // Appending used to be silent: no event, no save.
+        expect(events, hasLength(1));
+
+        // And the step survives a restart.
+        final reopened = LocalRoomRepository();
+        await _settle();
+        final restored = await reopened.getRoomState(
+          code,
+          viewerMemberId: owner,
+        );
+        expect(restored.steps.map((s) => s.title), contains('Late addition'));
+        // An append must not move the pointer.
+        expect(restored.room.currentStepId, currentId);
+        reopened.dispose();
+      },
+    );
+
+    test('removing a non-current step broadcasts and persists', () async {
+      final room = await makeRoom();
+      final code = room.room.code;
+      final owner = room.viewerMemberId!;
+      final before = await repo.getRoomState(code, viewerMemberId: owner);
+      final victim = before.steps.lastWhere(
+        (s) => s.id != before.room.currentStepId,
+      );
+
+      final events = <RoomEvent>[];
+      final sub = repo.events(code).listen(events.add);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      await repo.removeStep(code: code, memberId: owner, stepId: victim.id);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await sub.cancel();
+      await _settle();
+
+      expect(events, hasLength(1));
+
+      final reopened = LocalRoomRepository();
+      await _settle();
+      final restored = await reopened.getRoomState(code, viewerMemberId: owner);
+      expect(restored.steps, hasLength(before.steps.length - 1));
+      expect(restored.steps.map((s) => s.id), isNot(contains(victim.id)));
+      // Deleting a step that was not current must not move the pointer.
+      expect(restored.room.currentStepId, before.room.currentStepId);
+      reopened.dispose();
+    });
+
+    test(
+      'removing the last remaining step clears the pointer and persists',
+      () async {
+        final room = await makeRoom();
+        final code = room.room.code;
+        final owner = room.viewerMemberId!;
+        final n = templateFor(RoomType.meetup).defaultSteps.length;
+        // Jump to the end of the plan, then delete the step under the pointer
+        // again and again; the pointer steps back to the first remaining step
+        // until none is left.
+        for (var i = 0; i < n - 1; i++) {
+          await repo.advanceStep(code: code, memberId: owner);
+        }
+
+        final events = <RoomEvent>[];
+        final sub = repo.events(code).listen(events.add);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        while ((await repo.getRoomState(code)).steps.isNotEmpty) {
+          final state = await repo.getRoomState(code, viewerMemberId: owner);
+          final stepId = state.room.currentStepId ?? state.steps.first.id;
+          await repo.removeStep(code: code, memberId: owner, stepId: stepId);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await sub.cancel();
+        await _settle();
+
+        // Every removal broadcast — the final one, with no replacement to
+        // point at, used to be silent.
+        expect(events, hasLength(n));
+        expect((await repo.getRoomState(code)).room.currentStepId, isNull);
+
+        final reopened = LocalRoomRepository();
+        await _settle();
+        final restored = await reopened.getRoomState(code);
+        expect(restored.room.currentStepId, isNull);
+        expect(restored.steps, isEmpty);
+        reopened.dispose();
+      },
+    );
 
     test('advancing through multiple valid steps works end to end', () async {
       final room = await makeRoom();
@@ -1398,30 +1510,39 @@ void main() {
       );
     });
 
-    test('schema mismatch invokes onSchemaMismatch and clears storage', () async {
-      // Seed some data under the old schema.
-      final room = await makeRoom();
-      final code = room.room.code;
+    test(
+      'schema mismatch invokes onSchemaMismatch and clears storage',
+      () async {
+        // Seed some data under the old schema.
+        final room = await makeRoom();
+        final code = room.room.code;
 
-      // Simulate a schema bump by setting the stored version ahead.
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('gather.schemaVersion', 99);
+        // Let the room's fire-and-forget save land first, or it will race the
+        // version seed below and overwrite it back to the current version.
+        await _settle();
 
-      // A new repository with a mismatch callback should clear storage.
-      bool? mismatchCalled;
-      final reopened = LocalRoomRepository(onSchemaMismatch: () {
-        mismatchCalled = true;
-      });
-      await _settle();
+        // Simulate a schema bump by setting the stored version ahead.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('gather.schemaVersion', 99);
 
-      expect(mismatchCalled, isTrue);
-      await expectLater(
-        reopened.getRoomState(code),
-        throwsA(isA<GatherRuleException>()),
-      );
+        // A new repository with a mismatch callback should clear storage.
+        bool? mismatchCalled;
+        final reopened = LocalRoomRepository(
+          onSchemaMismatch: () {
+            mismatchCalled = true;
+          },
+        );
+        await _settle();
 
-      reopened.dispose();
-    });
+        expect(mismatchCalled, isTrue);
+        await expectLater(
+          reopened.getRoomState(code),
+          throwsA(isA<GatherRuleException>()),
+        );
+
+        reopened.dispose();
+      },
+    );
   });
 }
 
