@@ -288,7 +288,9 @@ void main() {
       repo.emit(
         const RoomEvent(RoomEventType.reaction, emoji: '🔥', memberId: 1),
       );
-      await Future<void>.delayed(const Duration(seconds: 3));
+      // A little past the 3s expiry: an exact wait races the timer callback
+      // under load.
+      await Future<void>.delayed(const Duration(milliseconds: 3100));
       await Future<void>.delayed(Duration.zero);
 
       expect(controller.reactions, isEmpty);
